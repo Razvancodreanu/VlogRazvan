@@ -1,304 +1,90 @@
-﻿// ---------- Firebase (CDN v12.2.1) ----------
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
-import {
-    getAuth, onAuthStateChanged,
-    signInWithEmailAndPassword, signOut
-} from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import {
-    getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc,
-    serverTimestamp, query, orderBy
-} from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
-
-// ---------- Configul TĂU ----------
-const firebaseConfig = {
-    apiKey: "AIzaSyBzEv4T0DJOs4uAGqQHqnSxYS3Z-vVgc8Y",
-    authDomain: "vlog-razvan.firebaseapp.com",
-    projectId: "vlog-razvan",
-    storageBucket: "vlog-razvan.firebasestorage.app",
-    messagingSenderId: "706536997376",
-    appId: "1:706536997376:web:6a79c94db29ed903628ee5"
-};
-
-// ---------- Init ----------
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// ---------- Elemente UI ----------
-const grid = document.getElementById("grid");
-const searchInput = document.getElementById("searchInput");
-const sortSelect = document.getElementById("sortSelect");
-const tagFilter = document.getElementById("tagFilter");
-const btnAdd = document.getElementById("btnAdd");
-const btnExport = document.getElementById("btnExport");
-const importBtn = document.getElementById("importBtn");
-const importInput = document.getElementById("importInput");
-const loadMoreBtn = document.getElementById("loadMore");
-
-const loginBtn = document.getElementById("loginBtn");
-const logoutBtn = document.getElementById("logoutBtn");
-const who = document.getElementById("who");
-
-const dlg = document.getElementById("addDialog");
-const titleInput = document.getElementById("titleInput");
-const urlInput = document.getElementById("urlInput");
-const dateInput = document.getElementById("dateInput");
-const tagsInput = document.getElementById("tagsInput");
-const descInput = document.getElementById("descInput");
-const saveBtn = document.getElementById("saveBtn");
-
-// ---------- State ----------
-let allVideos = [];
-let currentList = [];
-let renderedCount = 0;
-let isAdmin = false;
-let editId = null;
-
-const PAGE_SIZE = 9;
-const videosCol = collection(db, "videos");
-
-// ---------- Helpers ----------
-function isYouTube(u) {
-    try {
-        const url = new URL(u);
-        return /(^|\.)youtube\.com$/.test(url.hostname) || /(^|\.)youtu\.be$/.test(url.hostname);
-    } catch { return false; }
-}
-function toYouTubeEmbed(u) {
-    try {
-        const url = new URL(u);
-        if (/youtu\.be$/.test(url.hostname)) {
-            const id = url.pathname.split("/").filter(Boolean)[0];
-            return `https://www.youtube.com/embed/${id}`;
-        }
-        if (/youtube\.com$/.test(url.hostname)) {
-            const id = url.searchParams.get("v");
-            if (id) return `https://www.youtube.com/embed/${id}`;
-        }
-    } catch { }
-    return null;
-}
-function formatDate(s) { try { return new Date(s + "T00:00:00").toLocaleDateString("ro-RO"); } catch { return s; } }
-function uniqueTags(list) {
-    const st = new Set();
-    list.forEach(v => (v.tags || []).forEach(t => st.add(t)));
-    return [...st].sort((a, b) => a.localeCompare(b));
-}
-function refreshTagFilter() {
-    const prev = tagFilter.value || "";
-    const tags = uniqueTags(allVideos);
-    tagFilter.innerHTML = `<option value="">— Filtrează după tag —</option>` + tags.map(t => `<option value="${t}">${t}</option>`).join("");
-    if (tags.includes(prev)) tagFilter.value = prev;
-}
-function collectFilters() {
-    const q = (searchInput.value || "").toLowerCase().trim();
-    const tag = (tagFilter.value || "").toLowerCase().trim();
-    const sort = sortSelect.value;
-
-    let list = allVideos.filter(v => {
-        const inText = (v.title || "").toLowerCase().includes(q) ||
-            (v.desc || "").toLowerCase().includes(q) ||
-            (v.tags || []).some(t => t.toLowerCase().includes(q));
-        const tagOk = !tag || (v.tags || []).map(t => t.toLowerCase()).includes(tag);
-        return inText && tagOk;
-    });
-
-    if (sort === "newest") list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-    else if (sort === "oldest") list.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    else if (sort === "title") list.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
-
-    return list;
+﻿//:root{
+color - scheme: dark;
+--bg:#0b0d10; --panel:#10141a; --muted: #a7b0bf;
+--text: #e8edf4; --prim:#3b82f6; --prim - 700:#2e6bd0; --danger: #e5484d;
+--border:#1b2430;
 }
 
-// ---------- Render ----------
-function renderReset() {
-    grid.innerHTML = "";
-    renderedCount = 0;
-    currentList = collectFilters();
-    loadMoreBtn.hidden = currentList.length <= PAGE_SIZE;
-    renderMore();
-}
-function renderMore() {
-    const slice = currentList.slice(renderedCount, renderedCount + PAGE_SIZE);
-    slice.forEach(renderCard);
-    renderedCount += slice.length;
-    loadMoreBtn.hidden = renderedCount >= currentList.length;
-}
-function renderCard(v) {
-    const tpl = document.getElementById("cardTpl");
-    const node = tpl.content.firstElementChild.cloneNode(true);
-
-    const media = node.querySelector(".media");
-    const title = node.querySelector(".title");
-    const date = node.querySelector(".date");
-    const desc = node.querySelector(".desc");
-    const tagsEl = node.querySelector(".tags");
-
-    if (v.url && isYouTube(v.url)) {
-        const em = toYouTubeEmbed(v.url);
-        if (em) {
-            const ifr = document.createElement("iframe");
-            ifr.src = em;
-            ifr.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
-            ifr.allowFullscreen = true;
-            media.appendChild(ifr);
-        } else media.textContent = "Link YouTube neacceptat.";
-    } else if (v.url && /\.(mp4)(\?.*)?$/i.test(v.url)) {
-        const vid = document.createElement("video");
-        vid.controls = true;
-        vid.src = v.url;
-        media.appendChild(vid);
-    } else {
-        media.textContent = "Adaugă un URL YouTube sau un .mp4 găzduit.";
-    }
-
-    title.textContent = v.title || "Fără titlu";
-    date.textContent = v.date ? `Data: ${formatDate(v.date)}` : "";
-    desc.textContent = v.desc || "";
-    (v.tags || []).forEach(t => {
-        const s = document.createElement("span");
-        s.className = "tag"; s.textContent = t;
-        tagsEl.appendChild(s);
-    });
-
-    // Acțiuni vizibile doar pentru admin
-    const eb = node.querySelector('[data-action="edit"]');
-    const dbtn = node.querySelector('[data-action="delete"]');
-    eb.style.display = isAdmin ? "" : "none";
-    dbtn.style.display = isAdmin ? "" : "none";
-
-    eb.addEventListener("click", () => openEdit(v.id));
-    dbtn.addEventListener("click", async () => {
-        if (!confirm("Ștergi acest clip?")) return;
-        await deleteDoc(doc(db, "videos", v.id));
-        await reloadFromCloud();
-    });
-
-    grid.appendChild(node);
+* { box- sizing: border - box}
+html, body{ height: 100 %}
+body{
+    margin: 0; font - family: system - ui, -apple - system, Segoe UI, Roboto, Ubuntu, sans - serif;
+    background: var(--bg); color: var(--text);
 }
 
-// ---------- Cloud I/O ----------
-async function reloadFromCloud() {
-    const qy = query(videosCol, orderBy("date", "desc"));
-    const snap = await getDocs(qy);
-    allVideos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    refreshTagFilter();
-    renderReset();
+.topbar{
+    max - width: 1200px; margin: 24px auto 8px; padding: 0 16px;
+    display: flex; flex - wrap: wrap; gap: 12px; align - items: center; justify - content: space - between;
 }
-
-// ---------- Add/Edit ----------
-function openAdd() {
-    if (!isAdmin) return alert("Doar adminul poate adăuga.");
-    editId = null;
-    titleInput.value = "";
-    urlInput.value = "";
-    dateInput.value = new Date().toISOString().slice(0, 10);
-    tagsInput.value = "";
-    descInput.value = "";
-    dlg.showModal();
+.topbar h1{ margin: 0; font - size: clamp(1.6rem, 2.2vw, 2.4rem); letter - spacing: .3px }
+.toolbar{ display: flex; gap: 8px; align - items: center; flex - wrap: wrap }
+.input{
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    padding: .55rem .7rem; border - radius: .6rem; outline: none; min - width: 220px;
 }
-function openEdit(id) {
-    if (!isAdmin) return;
-    const v = allVideos.find(x => x.id === id); if (!v) return;
-    editId = id;
-    titleInput.value = v.title || "";
-    urlInput.value = v.url || "";
-    dateInput.value = v.date || new Date().toISOString().slice(0, 10);
-    tagsInput.value = (v.tags || []).join(", ");
-    descInput.value = v.desc || "";
-    dlg.showModal();
+.input:focus{ border - color:#2e3a52 }
+
+.btn{
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    padding: .55rem .8rem; border - radius: .6rem; cursor: pointer; transition: .15s;
 }
+.btn:hover{ filter: brightness(1.05) }
+.btn.primary{ background: var(--prim); border - color: var(--prim); color: white }
+.btn.primary:hover{ background: var(--prim - 700) }
+.btn.ghost{ background: transparent }
+.btn.spinner{ margin - inline: .35rem }
 
-saveBtn.addEventListener("click", async (e) => {
-    e.preventDefault();
-    if (!isAdmin) return alert("Doar adminul poate salva.");
-    const title = titleInput.value.trim() || "Fără titlu";
-    const url = urlInput.value.trim();
-    const date = dateInput.value || new Date().toISOString().slice(0, 10);
-    const tags = tagsInput.value.split(",").map(s => s.trim()).filter(Boolean);
-    const desc = (descInput.value || "").trim();
+.muted{ color: var(--muted) }
+.center{ display: flex; justify - content: center; margin: 16px 0 }
 
-    if (!url) return alert("Adaugă un URL (YouTube sau .mp4 găzduit).");
+.content{ max - width: 1200px; margin: 6px auto 32px; padding: 0 16px }
+.hint{ background:#0f1320; border: 1px dashed #1e2c49; border - radius: 12px; padding: .8rem 1rem; margin: 4px 0 14px }
 
-    if (editId) {
-        await updateDoc(doc(db, "videos", editId), { title, url, date, tags, desc });
-    } else {
-        await addDoc(videosCol, { title, url, date, tags, desc, createdAt: serverTimestamp() });
-    }
-    dlg.close();
-    await reloadFromCloud();
-});
+.grid{ display: grid; grid - template - columns: repeat(auto - fill, minmax(300px, 1fr)); gap: 16px }
+.card{
+    background: var(--panel); border: 1px solid var(--border); border - radius: 14px;
+    overflow: hidden; display: flex; flex - direction: column
+}
+.card.media iframe,.card.media video{ width: 100 %; aspect - ratio: 16 / 9; border: 0; display: block; background:#0c0f14 }
+.card.meta{ padding: 12px }
+.card.title{ margin: .2rem 0; font - size: 1.05rem }
+.card.date{ margin: 0 0 .35rem }
+.card.desc{ margin: .3rem 0 }
+.tags{ display: flex; flex - wrap: wrap; gap: .4rem }
+.tag{ background:#0f1729; color:#93b2ff; border: 1px solid #17223a; padding: .15rem .5rem; font - size: .8rem; border - radius: 999px }
 
-// ---------- Import / Export ----------
-if (importBtn) importBtn.addEventListener("click", () => importInput.click());
+.cardActions{ display: flex; gap: 8px; padding: 10px 12px 12px }
+.mini{ border: 1px solid var(--border); background:#0e1117; color: var(--text); border - radius: .45rem; padding: .35rem .6rem; cursor: pointer }
+.mini.danger{ background:#2a0f10; color: #ffb3b5; border - color:#3a1a1b }
+.mini:hover{ filter: brightness(1.1) }
 
-btnExport.addEventListener("click", () => {
-    const data = JSON.stringify(allVideos, null, 2);
-    const blob = new Blob([data], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "vlog-videos.json"; a.click();
-    URL.revokeObjectURL(url);
-});
-importInput.addEventListener("change", async () => {
-    if (!isAdmin) { importInput.value = ""; return alert("Doar adminul poate importa."); }
-    const f = importInput.files?.[0]; if (!f) return;
-    try {
-        const arr = JSON.parse(await f.text());
-        if (!Array.isArray(arr)) throw new Error("Format invalid");
-        for (const v of arr) {
-            await addDoc(videosCol, {
-                title: v.title || "Fără titlu",
-                url: v.url || "",
-                date: v.date || new Date().toISOString().slice(0, 10),
-                desc: v.desc || "",
-                tags: Array.isArray(v.tags) ? v.tags.filter(Boolean) : [],
-                createdAt: serverTimestamp()
-            });
-        }
-        await reloadFromCloud();
-        alert("Import realizat.");
-    } catch (e) { alert("Eroare la import: " + e.message); }
-    importInput.value = "";
-});
+.dialog{ border: 0; border - radius: 16px; padding: 0; background: var(--panel); color: var(--text); width: min(720px, 92vw) }
+.dialog::backdrop{ background: rgba(0, 0, 0, .55) }
+.dialogBody{ padding: 0; margin: 0 }
+.dialogHeader{ padding: 14px 16px 6px; border - bottom: 1px solid var(--border) }
+.dialogHeader h3{ margin: .1rem 0 .6rem }
+.tabs{ display: flex; gap: 8px }
+.tab{
+    background:#0e1117; border: 1px solid var(--border); color: var(--text);
+    padding: .35rem .6rem; border - radius: .45rem; cursor: pointer
+}
+.tab.active{ background:#182033; border - color:#22314e }
 
-// ---------- Căutare / Filtre / Paginare ----------
-searchInput.addEventListener("input", renderReset);
-sortSelect.addEventListener("change", renderReset);
-tagFilter.addEventListener("change", renderReset);
-btnAdd.addEventListener("click", openAdd);
-loadMoreBtn.addEventListener("click", renderMore);
+.dialog section{ padding: 14px 16px; display: block }
+label{ display: block; margin: .6rem 0 }
+label.input, label textarea{ width: 100 %}
+.row{ display: grid; grid - template - columns: 1fr 1fr; gap: 10px }
+.dialogFooter{ display: flex; gap: 10px; justify - content: flex - end; padding: 12px 16px; border - top: 1px solid var(--border) }
 
-// ---------- Auth ----------
-loginBtn.addEventListener("click", async () => {
-    const email = prompt("Email admin:");
-    if (!email) return;
-    const pass = prompt("Parola:");
-    if (!pass) return;
-    try { await signInWithEmailAndPassword(auth, email, pass); }
-    catch (e) { alert("Autentificare eșuată: " + e.message); }
-});
-logoutBtn.addEventListener("click", () => signOut(auth));
+/* DropZone upload */
+.dropZone{
+    border: 2px dashed #2b2b2b; border - radius: 12px;
+    background:#0e0e0e; color: #dcdcdc;
+    padding: 1.2rem; text - align: center; cursor: pointer;
+    transition:all .15s ease; outline: none;
+}
+.dropZone: hover,.dropZone.hover{ border - color:#3b82f6; background:#10141d; }
+.dropZone.dzIcon{ font - size: 2rem; opacity: .85; }
+.dropZone.dzText{ margin - top: .35rem; font - size: .95rem; opacity: .85; }
 
-onAuthStateChanged(auth, (user) => {
-    isAdmin = !!user;
-
-    // butoane login/logout
-    loginBtn.style.display = user ? "none" : "";
-    logoutBtn.style.display = user ? "" : "none";
-    who.textContent = user ? `Conectat: ${user.email}` : "";
-
-    // controale admin
-    btnAdd.hidden = !isAdmin;
-    btnExport.hidden = !isAdmin;
-    importBtn.hidden = !isAdmin;
-
-    // re-render pentru a ascunde/afișa Editează/Șterge
-    renderReset();
-});
-
-// ---------- Start ----------
-reloadFromCloud().catch(err => {
-    console.error(err);
-    grid.innerHTML = "<p>Eroare la încărcarea listei. Verifică Firestore.</p>";
-});
+progress{ width: 100 %; height: 10px; margin - top: .6rem }
