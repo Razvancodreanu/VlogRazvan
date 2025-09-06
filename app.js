@@ -36,16 +36,6 @@ async function idbGet(key) {
     });
 }
 
-async function idbDel(key) {
-    const db = await idbOpen();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).delete(key);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
-}
-
 async function saveLocalBlob(file) {
     const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     await idbPut(key, file);
@@ -116,15 +106,11 @@ const dateInput = document.getElementById("dateInput");
 const tagsInput = document.getElementById("tagsInput");
 const descInput = document.getElementById("descInput");
 
-// Vizibilitate (Link)
-const visLink = document.getElementById("visLink");
-
 // Inputs (Upload local)
 const fileInput = document.getElementById("fileInput");
 const uTitleInput = document.getElementById("uTitleInput");
 const uDateInput = document.getElementById("uDateInput");
 const uTagsInput = document.getElementById("uTagsInput");
-const visUpload = document.getElementById("visUpload");
 const prog = document.getElementById("uploadProgress");
 const progInfo = document.getElementById("uploadInfo");
 
@@ -185,8 +171,7 @@ function collectFilters() {
             (v.desc || "").toLowerCase().includes(q) ||
             (v.tags || []).some(t => t.toLowerCase().includes(q));
         const tagOk = !tag || (v.tags || []).map(t => t.toLowerCase()).includes(tag);
-        const visibleOk = isAdmin || ((v.visibility || 'public') === 'public');
-        return inText && tagOk && visibleOk;
+        return inText && tagOk;
     });
 
     if (sort === "newest") list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
@@ -242,27 +227,14 @@ function renderCard(v) {
         vid.controls = true;
         vid.src = v.url;
         media.appendChild(vid);
-    } else if (v.localKey) {
-        media.textContent = "Se încarcă fișierul local...";
-        idbGet(v.localKey).then(blob => {
-            if (!blob) { media.textContent = "Fișier local indisponibil pe acest dispozitiv."; return; }
-            const url = URL.createObjectURL(blob);
-            if ((v.localMime || '').startsWith('image/')) {
-                const img = document.createElement('img'); img.src = url; img.style.maxWidth = '100%'; img.style.display = 'block'; media.innerHTML = ''; media.appendChild(img);
-            } else {
-                const vid = document.createElement('video'); vid.controls = true; vid.src = url; media.innerHTML = ''; media.appendChild(vid);
-            }
-        }).catch(() => { media.textContent = 'Eroare la fișierul local.'; });
+    } else if (v.blobUrl) {
+        const vid = document.createElement("video");
+        vid.controls = true;
+        vid.src = v.blobUrl;
+        media.appendChild(vid);
     } else {
         media.textContent = "Adaugă un URL sau un fișier .mp4.";
     }
-
-    const badge = document.createElement("div");
-    badge.className = "muted";
-    badge.style.margin = ".4rem .9rem 0";
-    badge.style.fontSize = ".8rem";
-    badge.textContent = ((v.visibility || "public").toUpperCase());
-    node.insertBefore(badge, node.querySelector(".meta"));
 
     title.textContent = v.title || "Fără titlu";
     date.textContent = v.date ? `Data: ${formatDate(v.date)}` : "";
@@ -283,7 +255,6 @@ function renderCard(v) {
     eb.addEventListener("click", () => openEdit(v.id));
     db.addEventListener("click", () => {
         if (!confirm("Ștergi acest clip?")) return;
-        if (v.localKey) { try { idbDel(v.localKey); } catch (e) { } }
         videos = videos.filter(x => x.id !== v.id);
         saveVideos(videos);
         refreshTagFilter();
@@ -315,8 +286,6 @@ function openAdd() {
     dateInput.value = new Date().toISOString().slice(0, 10);
     tagsInput.value = "";
     descInput.value = "";
-    if (visLink) visLink.checked = true;
-    if (visUpload) visUpload.checked = true;
     // Reset Upload
     fileInput.value = "";
     uTitleInput.value = "";
@@ -336,7 +305,6 @@ function openEdit(id) {
     dateInput.value = v.date || new Date().toISOString().slice(0, 10);
     tagsInput.value = (v.tags || []).join(", ");
     descInput.value = v.desc || "";
-    if (visLink) visLink.checked = (v.visibility !== "private");
     dlg.showModal();
 }
 
@@ -351,7 +319,6 @@ saveBtn.addEventListener("click", (e) => {
         const date = dateInput.value || new Date().toISOString().slice(0, 10);
         const tags = tagsInput.value.split(",").map(s => s.trim()).filter(Boolean);
         const desc = (descInput.value || "").trim();
-        const visibility = visLink && visLink.checked ? "public" : "private";
 
         if (editId) {
             const idx = videos.findIndex(x => x.id === editId);
@@ -375,14 +342,12 @@ saveBtn.addEventListener("click", (e) => {
     const date = uDateInput.value || new Date().toISOString().slice(0, 10);
     const tags = uTagsInput.value.split(",").map(s => s.trim()).filter(Boolean);
 
-    const visibility = visUpload && visUpload.checked ? "public" : "private";
-
-    const { key, mime } = await saveLocalBlob(file);
+    const blobUrl = URL.createObjectURL(file);
     if (editId) {
         const idx = videos.findIndex(x => x.id === editId);
-        if (idx >= 0) videos[idx] = { ...videos[idx], title, date, tags, desc: "", url: "", localKey: key, localMime: mime, visibility };
+        if (idx >= 0) videos[idx] = { ...videos[idx], title, blobUrl, url: "", date, tags, desc: "" };
     } else {
-        videos.unshift({ id: Date.now(), title, date, tags, desc: "", url: "", localKey: key, localMime: mime, visibility });
+        videos.unshift({ id: Date.now(), title, blobUrl, url: "", date, tags, desc: "" });
     }
     saveVideos(videos);
     refreshTagFilter();
