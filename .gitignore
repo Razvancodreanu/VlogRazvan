@@ -1,0 +1,11 @@
+﻿.vs/
+.vscode/
+node_modules/
+bin/
+obj/
+dist/
+*.log
+*.user
+*.suo
+*.vsidx
+*.sln.docstates

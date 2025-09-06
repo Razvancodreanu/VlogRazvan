@@ -1,0 +1,136 @@
+<!
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vlogul lui Razvan</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+    <header class="container">
+        <h1>Vlogul lui Razvan</h1>
+        <p class="subtitle">Clipuri noi, zilnic. Cele mai recente apar primele.</p>
+
+        <div class="toolbar">
+            <button id="btnAdd">+ Adaugă clip</button>
+            <input id="searchInput" type="search" placeholder="Caută titlu sau tag..." />
+            <select id="tagFilter">
+                <option value="">— Filtrează după tag —</option>
+            </select>
+            <select id="sortSelect" title="Sortare">
+                <option value="newest">Noi → Vechi</option>
+                <option value="oldest">Vechi → Noi</option>
+                <option value="title">Titlu A→Z</option>
+            </select>
+            <button id="btnExport" title="Exportă lista ca JSON">Export</button>
+            <label class="importLabel">
+                Import
+                <input id="importInput" type="file" accept="application/json" />
+            </label>
+        </div>
+    </header>
+
+    <main class="container">
+        <div id="infoBox" class="info">
+            Sfat: pentru clipurile <strong>.mp4 locale</strong>, folosește butonul „Adaugă clip” → „Fișier local”.
+            Linkurile YouTube sunt ideale pentru persistență. Datele se salvează în <em>localStorage</em>.
+        </div>
+
+        <section id="grid" class="grid"></section>
+
+        <div class="center">
+            <button id="loadMore" class="ghost" hidden>Încarcă mai multe</button>
+        </div>
+    </main>
+
+    <!-- Modal Add -->
+    <dialog id="addDialog">
+        <form method="dialog" class="dialog">
+            <h2>Adaugă un clip</h2>
+
+            <div class="tabs">
+                <button type="button" class="tab active" data-tab="youtube">Link YouTube / MP4</button>
+                <button type="button" class="tab" data-tab="local">Fișier local (.mp4)</button>
+            </div>
+
+            <div class="tabPanel" data-panel="youtube" style="display:block">
+                <label>
+                    Titlu
+                    <input id="titleInput" type="text" placeholder="Ex: Vlog 6 septembrie" required />
+                </label>
+
+                <label>
+                    URL video (YouTube sau .mp4)
+                    <input id="urlInput" type="url" placeholder="https://youtu.be/… sau https://site.ro/video.mp4" />
+                </label>
+
+                <label>
+                    Dată
+                    <input id="dateInput" type="date" />
+                </label>
+
+                <label>
+                    Tag-uri (separate prin virgulă)
+                    <input id="tagsInput" type="text" placeholder="daily, vlog, behind-the-scenes" />
+                </label>
+
+                <label>
+                    Descriere
+                    <textarea id="descInput" rows="3" placeholder="Ce se întâmplă în acest episod?"></textarea>
+                </label>
+            </div>
+
+            <div class="tabPanel" data-panel="local">
+                <div class="drop" id="dropZone">
+                    <p>Trage aici un fișier <strong>.mp4</strong> sau apasă pentru a alege</p>
+                    <input id="fileInput" type="file" accept="video/mp4" />
+                </div>
+
+                <label>
+                    Titlu
+                    <input id="localTitleInput" type="text" placeholder="Ex: Vlog 6 septembrie" />
+                </label>
+
+                <label>
+                    Dată
+                    <input id="localDateInput" type="date" />
+                </label>
+
+                <label>
+                    Tag-uri (separate prin virgulă)
+                    <input id="localTagsInput" type="text" placeholder="daily, vlog" />
+                </label>
+
+                <small class="muted">
+                    Notă: fișierele locale sunt afișate printr-un link temporar (nu rămân după închiderea paginii).
+                    Pentru persistență, urcă pe YouTube sau găzduiește .mp4 online și folosește URL.
+                </small>
+            </div>
+
+            <menu class="dialogActions">
+                <button value="cancel" class="ghost">Anulează</button>
+                <button id="saveBtn" value="default" class="primary">Salvează</button>
+            </menu>
+        </form>
+    </dialog>
+
+    <template id="cardTpl">
+        <article class="card">
+            <div class="media"></div>
+            <div class="meta">
+                <h3 class="title"></h3>
+                <p class="date"></p>
+                <p class="desc"></p>
+                <div class="tags"></div>
+            </div>
+            <div class="cardActions">
+                <button class="mini" data-action="edit">Editează</button>
+                <button class="mini danger" data-action="delete">Șterge</button>
+            </div>
+        </article>
+    </template>
+
+    <script src="app.js"></script>
+</body>
+</html>
