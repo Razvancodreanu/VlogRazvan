@@ -1,90 +1,448 @@
-﻿//:root{
-color - scheme: dark;
---bg:#0b0d10; --panel:#10141a; --muted: #a7b0bf;
---text: #e8edf4; --prim:#3b82f6; --prim - 700:#2e6bd0; --danger: #e5484d;
---border:#1b2430;
+﻿// ===== Firebase – importuri ESM din CDN
+import {
+    initializeApp
+} from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+
+import {
+    getFirestore, collection, query, orderBy, getDocs, addDoc, updateDoc, deleteDoc,
+    doc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
+
+import {
+    getAuth, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup,
+    signInWithEmailAndPassword
+} from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
+
+import {
+    getStorage, ref as sRef, uploadBytesResumable, getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.12.4/firebase-storage.js";
+
+// ===== Configul tău (exact cum ți-l dă Firebase)
+const firebaseConfig = {
+    apiKey: "AIzaSyBzEv4T0DJOs4uAGqQHqnSxYS3Z-vVgc8Y",
+    authDomain: "vlog-razvan.firebaseapp.com",
+    projectId: "vlog-razvan",
+    storageBucket: "vlog-razvan.firebasestorage.app",
+    messagingSenderId: "706536997376",
+    appId: "1:706536997376:web:6a79c94db29ed903628ee5",
+    measurementId: "G-PVMVHWM9JT"
+};
+
+// ===== Init
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const storage = getStorage(app);
+
+// ===== DOM refs
+const grid = document.getElementById("grid");
+const searchInput = document.getElementById("searchInput");
+const sortSelect = document.getElementById("sortSelect");
+const tagFilterBtn = document.getElementById("tagFilter");
+const tagMenu = document.getElementById("tagMenu");
+
+const btnAdd = document.getElementById("btnAdd");
+const btnExport = document.getElementById("btnExport");
+const btnImport = document.getElementById("btnImport");
+const importInput = document.getElementById("importInput");
+const authBtn = document.getElementById("authBtn");
+const loadMoreBtn = document.getElementById("loadMore");
+const errorBox = document.getElementById("errorBox");
+
+const dlg = document.getElementById("addDialog");
+const tabs = [...document.querySelectorAll(".tab")];
+const panels = [...document.querySelectorAll(".tabPanel")];
+
+const titleInput = document.getElementById("titleInput");
+const urlInput = document.getElementById("urlInput");
+const dateInput = document.getElementById("dateInput");
+const tagsInput = document.getElementById("tagsInput");
+const descInput = document.getElementById("descInput");
+
+const dropZone = document.getElementById("dropZone");
+const pickFileBtn = document.getElementById("pickFile");
+const fileInput = document.getElementById("fileInput");
+const localTitleInput = document.getElementById("localTitleInput");
+const localDateInput = document.getElementById("localDateInput");
+const localTagsInput = document.getElementById("localTagsInput");
+const uploadProgress = document.getElementById("uploadProgress");
+const saveBtn = document.getElementById("saveBtn");
+
+// ===== Setări
+const PAGE_SIZE = 12;
+const ADMIN_EMAIL = "razvan.codreanu90@gmail.com";
+
+// ===== State
+let currentUser = null;
+let isOwner = false;
+let allVideos = [];         // tot ce vine din Firestore
+let filtered = [];          // după căutare/filtru/sort
+let renderedCount = 0;      // paginare
+let editId = null;
+
+// ===== Utils
+function fmtDate(s) { try { return new Date(s).toLocaleDateString("ro-RO") } catch { return s } }
+function uniqTags(list) {
+    const set = new Set();
+    list.forEach(v => (v.tags || []).forEach(t => set.add(t)));
+    return [...set].sort((a, b) => a.localeCompare(b));
+}
+function isYouTube(u) {
+    try {
+        const url = new URL(u);
+        return /(^|\.)youtube\.com$/i.test(url.hostname) || /(^|\.)youtu\.be$/i.test(url.hostname);
+    } catch { return false }
+}
+function toYouTubeEmbed(u) {
+    try {
+        const url = new URL(u);
+        if (/youtu\.be$/i.test(url.hostname)) {
+            const id = url.pathname.split("/").filter(Boolean)[0];
+            return `https://www.youtube.com/embed/${id}`;
+        }
+        if (/youtube\.com$/i.test(url.hostname)) {
+            const id = url.searchParams.get("v");
+            if (id) return `https://www.youtube.com/embed/${id}`;
+        }
+    } catch { }
+    return null;
 }
 
-* { box- sizing: border - box}
-html, body{ height: 100 %}
-body{
-    margin: 0; font - family: system - ui, -apple - system, Segoe UI, Roboto, Ubuntu, sans - serif;
-    background: var(--bg); color: var(--text);
+// ===== Auth
+authBtn.addEventListener("click", async () => {
+    if (currentUser) {
+        await signOut(auth);
+        return;
+    }
+    // încearcă Google, dacă e blocat, cere Email/Parolă
+    try {
+        await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (e) {
+        try {
+            const email = prompt("Email (Firebase Auth):", "");
+            if (!email) return;
+            const pwd = prompt("Parolă:", "");
+            if (!pwd) return;
+            await signInWithEmailAndPassword(auth, email, pwd);
+        } catch (err) {
+            alert("Autentificare eșuată.");
+            console.error(err);
+        }
+    }
+});
+
+onAuthStateChanged(auth, (u) => {
+    currentUser = u;
+    isOwner = !!(u && u.email && u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
+    authBtn.textContent = u ? "Ieșire" : "Autentificare";
+    // doar ownerul vede acțiunile de administrare
+    btnAdd.hidden = btnExport.hidden = btnImport.hidden = !isOwner;
+});
+
+// ===== Load videos din Firestore
+async function loadVideos() {
+    try {
+        errorBox.hidden = true;
+        const q = query(collection(db, "videos"), orderBy("createdAt", "desc"));
+        const snap = await getDocs(q);
+        allVideos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        buildTagMenu();
+        applyFilters();
+    } catch (e) {
+        errorBox.textContent = "Eroare la încărcarea listei. Verifică Firestore.";
+        errorBox.hidden = false;
+        console.error(e);
+    }
+}
+function buildTagMenu() {
+    const tags = uniqTags(allVideos);
+    tagMenu.innerHTML = "";
+    const allItem = document.createElement("li");
+    allItem.textContent = "Toate tag-urile";
+    allItem.dataset.tag = "";
+    tagMenu.appendChild(allItem);
+    tags.forEach(t => {
+        const li = document.createElement("li");
+        li.textContent = t;
+        li.dataset.tag = t;
+        tagMenu.appendChild(li);
+    });
+}
+let activeTag = "";
+tagFilterBtn.addEventListener("click", () => {
+    tagMenu.hidden = !tagMenu.hidden;
+});
+tagMenu.addEventListener("click", (e) => {
+    const li = e.target.closest("li");
+    if (!li) return;
+    activeTag = li.dataset.tag || "";
+    tagFilterBtn.textContent = activeTag ? `Tag: ${activeTag}` : "— Filtrează după tag —";
+    tagMenu.hidden = true;
+    applyFilters();
+});
+
+// ===== Filtrare/Sortare/Paginare
+function applyFilters() {
+    const q = (searchInput.value || "").toLowerCase().trim();
+    const tag = (activeTag || "").toLowerCase();
+
+    filtered = allVideos.filter(v => {
+        const inText = (v.title || "").toLowerCase().includes(q) ||
+            (v.desc || "").toLowerCase().includes(q) ||
+            (v.tags || []).some(t => t.toLowerCase().includes(q));
+        const tagOk = !tag || (v.tags || []).map(t => t.toLowerCase()).includes(tag);
+        return inText && tagOk;
+    });
+
+    const s = sortSelect.value;
+    if (s === "newest") filtered.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    else if (s === "oldest") filtered.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    else if (s === "title") filtered.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+
+    renderedCount = 0;
+    grid.innerHTML = "";
+    renderMore();
+}
+function renderMore() {
+    const slice = filtered.slice(renderedCount, renderedCount + PAGE_SIZE);
+    slice.forEach(renderCard);
+    renderedCount += slice.length;
+    loadMoreBtn.hidden = renderedCount >= filtered.length;
 }
 
-.topbar{
-    max - width: 1200px; margin: 24px auto 8px; padding: 0 16px;
-    display: flex; flex - wrap: wrap; gap: 12px; align - items: center; justify - content: space - between;
+searchInput.addEventListener("input", applyFilters);
+sortSelect.addEventListener("change", applyFilters);
+loadMoreBtn.addEventListener("click", renderMore);
+
+// ===== Render card
+function renderCard(v) {
+    const tpl = document.getElementById("cardTpl");
+    const node = tpl.content.firstElementChild.cloneNode(true);
+
+    const media = node.querySelector(".media");
+    const title = node.querySelector(".title");
+    const date = node.querySelector(".date");
+    const desc = node.querySelector(".desc");
+    const tagsEl = node.querySelector(".tags");
+
+    if (v.url && isYouTube(v.url)) {
+        const em = toYouTubeEmbed(v.url);
+        if (em) {
+            const ifr = document.createElement("iframe");
+            ifr.src = em;
+            ifr.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+            ifr.allowFullscreen = true;
+            media.appendChild(ifr);
+        } else {
+            media.textContent = "Link YouTube invalid.";
+        }
+    } else if (v.url && /\.mp4(\?.*)?$/i.test(v.url)) {
+        const vid = document.createElement("video");
+        vid.controls = true; vid.src = v.url;
+        media.appendChild(vid);
+    } else {
+        media.textContent = "Niciun media.";
+    }
+
+    title.textContent = v.title || "Fără titlu";
+    date.textContent = v.date ? `Data: ${fmtDate(v.date)}` : "";
+    desc.textContent = v.desc || "";
+    (v.tags || []).forEach(t => {
+        const span = document.createElement("span");
+        span.className = "tag"; span.textContent = t;
+        tagsEl.appendChild(span);
+    });
+
+    const canEdit = isOwner;
+    node.querySelector('[data-action="edit"]').hidden = !canEdit;
+    node.querySelector('[data-action="delete"]').hidden = !canEdit;
+
+    node.querySelector('[data-action="edit"]').addEventListener("click", () => openEdit(v.id));
+    node.querySelector('[data-action="delete"]').addEventListener("click", () => delVideo(v.id));
+    grid.appendChild(node);
 }
-.topbar h1{ margin: 0; font - size: clamp(1.6rem, 2.2vw, 2.4rem); letter - spacing: .3px }
-.toolbar{ display: flex; gap: 8px; align - items: center; flex - wrap: wrap }
-.input{
-    background: var(--panel); border: 1px solid var(--border); color: var(--text);
-    padding: .55rem .7rem; border - radius: .6rem; outline: none; min - width: 220px;
+
+// ===== Add / Edit / Delete
+btnAdd.addEventListener("click", openAdd);
+
+function openAdd() {
+    if (!isOwner) return;
+    editId = null;
+    activateTab("youtube");
+    titleInput.value = ""; urlInput.value = ""; descInput.value = "";
+    tagsInput.value = "";
+    dateInput.valueAsDate = new Date();
+    fileInput.value = ""; localTitleInput.value = ""; localTagsInput.value = "";
+    localDateInput.valueAsDate = new Date();
+    uploadProgress.hidden = true; uploadProgress.value = 0;
+    dlg.showModal();
 }
-.input:focus{ border - color:#2e3a52 }
-
-.btn{
-    border: 1px solid var(--border); background: var(--panel); color: var(--text);
-    padding: .55rem .8rem; border - radius: .6rem; cursor: pointer; transition: .15s;
+function openEdit(id) {
+    if (!isOwner) return;
+    const v = allVideos.find(x => x.id === id);
+    if (!v) return;
+    editId = id;
+    if (v.url && /\.mp4(\?.*)?$/i.test(v.url) && !isYouTube(v.url)) {
+        activateTab("local");
+        localTitleInput.value = v.title || "";
+        localDateInput.value = v.date || new Date().toISOString().slice(0, 10);
+        localTagsInput.value = (v.tags || []).join(", ");
+    } else {
+        activateTab("youtube");
+        titleInput.value = v.title || "";
+        urlInput.value = v.url || "";
+        dateInput.value = v.date || new Date().toISOString().slice(0, 10);
+        tagsInput.value = (v.tags || []).join(", ");
+        descInput.value = v.desc || "";
+    }
+    dlg.showModal();
 }
-.btn:hover{ filter: brightness(1.05) }
-.btn.primary{ background: var(--prim); border - color: var(--prim); color: white }
-.btn.primary:hover{ background: var(--prim - 700) }
-.btn.ghost{ background: transparent }
-.btn.spinner{ margin - inline: .35rem }
 
-.muted{ color: var(--muted) }
-.center{ display: flex; justify - content: center; margin: 16px 0 }
-
-.content{ max - width: 1200px; margin: 6px auto 32px; padding: 0 16px }
-.hint{ background:#0f1320; border: 1px dashed #1e2c49; border - radius: 12px; padding: .8rem 1rem; margin: 4px 0 14px }
-
-.grid{ display: grid; grid - template - columns: repeat(auto - fill, minmax(300px, 1fr)); gap: 16px }
-.card{
-    background: var(--panel); border: 1px solid var(--border); border - radius: 14px;
-    overflow: hidden; display: flex; flex - direction: column
+async function delVideo(id) {
+    if (!isOwner) return;
+    if (!confirm("Ștergi acest clip?")) return;
+    try {
+        await deleteDoc(doc(db, "videos", id));
+        await loadVideos();
+    } catch (e) { alert("Eroare la ștergere."); console.error(e) }
 }
-.card.media iframe,.card.media video{ width: 100 %; aspect - ratio: 16 / 9; border: 0; display: block; background:#0c0f14 }
-.card.meta{ padding: 12px }
-.card.title{ margin: .2rem 0; font - size: 1.05rem }
-.card.date{ margin: 0 0 .35rem }
-.card.desc{ margin: .3rem 0 }
-.tags{ display: flex; flex - wrap: wrap; gap: .4rem }
-.tag{ background:#0f1729; color:#93b2ff; border: 1px solid #17223a; padding: .15rem .5rem; font - size: .8rem; border - radius: 999px }
 
-.cardActions{ display: flex; gap: 8px; padding: 10px 12px 12px }
-.mini{ border: 1px solid var(--border); background:#0e1117; color: var(--text); border - radius: .45rem; padding: .35rem .6rem; cursor: pointer }
-.mini.danger{ background:#2a0f10; color: #ffb3b5; border - color:#3a1a1b }
-.mini:hover{ filter: brightness(1.1) }
-
-.dialog{ border: 0; border - radius: 16px; padding: 0; background: var(--panel); color: var(--text); width: min(720px, 92vw) }
-.dialog::backdrop{ background: rgba(0, 0, 0, .55) }
-.dialogBody{ padding: 0; margin: 0 }
-.dialogHeader{ padding: 14px 16px 6px; border - bottom: 1px solid var(--border) }
-.dialogHeader h3{ margin: .1rem 0 .6rem }
-.tabs{ display: flex; gap: 8px }
-.tab{
-    background:#0e1117; border: 1px solid var(--border); color: var(--text);
-    padding: .35rem .6rem; border - radius: .45rem; cursor: pointer
+// Tabs
+function activateTab(name) {
+    tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+    panels.forEach(p => p.style.display = (p.dataset.panel === name) ? "block" : "none");
 }
-.tab.active{ background:#182033; border - color:#22314e }
+tabs.forEach(b => b.addEventListener("click", () => activateTab(b.dataset.tab)));
 
-.dialog section{ padding: 14px 16px; display: block }
-label{ display: block; margin: .6rem 0 }
-label.input, label textarea{ width: 100 %}
-.row{ display: grid; grid - template - columns: 1fr 1fr; gap: 10px }
-.dialogFooter{ display: flex; gap: 10px; justify - content: flex - end; padding: 12px 16px; border - top: 1px solid var(--border) }
+// Save
+saveBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    if (!isOwner) return;
 
-/* DropZone upload */
-.dropZone{
-    border: 2px dashed #2b2b2b; border - radius: 12px;
-    background:#0e0e0e; color: #dcdcdc;
-    padding: 1.2rem; text - align: center; cursor: pointer;
-    transition:all .15s ease; outline: none;
-}
-.dropZone: hover,.dropZone.hover{ border - color:#3b82f6; background:#10141d; }
-.dropZone.dzIcon{ font - size: 2rem; opacity: .85; }
-.dropZone.dzText{ margin - top: .35rem; font - size: .95rem; opacity: .85; }
+    const active = tabs.find(t => t.classList.contains("active"))?.dataset.tab;
 
-progress{ width: 100 %; height: 10px; margin - top: .6rem }
+    try {
+        if (active === "youtube") {
+            // VALIDARE minimă
+            const title = titleInput.value.trim() || "Fără titlu";
+            const url = urlInput.value.trim();
+            if (!url) { alert("Te rog adaugă un URL (YouTube sau .mp4)"); return; }
+            const date = dateInput.value || new Date().toISOString().slice(0, 10);
+            const tags = tagsInput.value.split(",").map(s => s.trim()).filter(Boolean);
+            const desc = (descInput.value || "").trim();
+
+            const payload = { title, url, date, tags, desc, createdAt: serverTimestamp() };
+            if (editId) {
+                await updateDoc(doc(db, "videos", editId), payload);
+            } else {
+                await addDoc(collection(db, "videos"), payload);
+            }
+            dlg.close();
+            await loadVideos();
+        } else {
+            // Upload .mp4 în Firebase Storage (drag/drop sau file picker)
+            const file = fileInput.files?.[0];
+            if (!file) { alert("Alege un fișier .mp4"); return; }
+            if (file.type !== "video/mp4") { alert("Doar .mp4"); return; }
+
+            const title = (localTitleInput.value.trim() || file.name.replace(/\.[^.]+$/, ""));
+            const date = (localDateInput.value || new Date().toISOString().slice(0, 10));
+            const tags = localTagsInput.value.split(",").map(s => s.trim()).filter(Boolean);
+
+            // cale stocare
+            const uid = currentUser?.uid || "anon";
+            const path = `videos/${uid}/${Date.now()}-${file.name}`;
+            const storageRef = sRef(storage, path);
+            const task = uploadBytesResumable(storageRef, file, { contentType: "video/mp4" });
+
+            uploadProgress.hidden = false; uploadProgress.value = 0;
+
+            await new Promise((resolve, reject) => {
+                task.on("state_changed", (snap) => {
+                    const pct = Math.round(100 * snap.bytesTransferred / snap.totalBytes);
+                    uploadProgress.value = pct;
+                }, reject, resolve);
+            });
+
+            const downloadURL = await getDownloadURL(task.snapshot.ref);
+            const payload = { title, url: downloadURL, date, tags, desc: "", createdAt: serverTimestamp() };
+            if (editId) {
+                await updateDoc(doc(db, "videos", editId), payload);
+            } else {
+                await addDoc(collection(db, "videos"), payload);
+            }
+            uploadProgress.hidden = true; uploadProgress.value = 0;
+            dlg.close();
+            await loadVideos();
+        }
+    } catch (err) {
+        alert("Eroare la salvare.");
+        console.error(err);
+    }
+});
+
+// Drag & drop + picker
+["dragenter", "dragover"].forEach(ev => {
+    dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add("drag"); });
+});
+["dragleave", "drop"].forEach(ev => {
+    dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove("drag"); });
+});
+dropZone.addEventListener("drop", (e) => {
+    const f = e.dataTransfer?.files?.[0];
+    if (f && f.type === "video/mp4") {
+        fileInput.files = e.dataTransfer.files;
+        if (!localTitleInput.value) localTitleInput.value = f.name.replace(/\.[^.]+$/, "");
+    }
+});
+dropZone.addEventListener("click", () => pickFileBtn.click());
+pickFileBtn.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => {
+    const f = fileInput.files?.[0];
+    if (f && !localTitleInput.value) localTitleInput.value = f.name.replace(/\.[^.]+$/, "");
+});
+
+// Export / Import (doar admin)
+btnExport.addEventListener("click", () => {
+    const data = JSON.stringify(allVideos, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "vlog-videos.json"; a.click();
+    URL.revokeObjectURL(url);
+});
+btnImport.addEventListener("click", () => importInput.click());
+importInput.addEventListener("change", () => {
+    const file = importInput.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+        try {
+            const arr = JSON.parse(reader.result);
+            if (!Array.isArray(arr)) throw new Error("Format invalid");
+            // import simplu – adaugă ca documente noi
+            for (const x of arr) {
+                const payload = {
+                    title: x.title || "Fără titlu",
+                    url: x.url || "",
+                    date: x.date || new Date().toISOString().slice(0, 10),
+                    desc: x.desc || "",
+                    tags: Array.isArray(x.tags) ? x.tags.filter(Boolean) : [],
+                    createdAt: serverTimestamp()
+                };
+                await addDoc(collection(db, "videos"), payload);
+            }
+            await loadVideos();
+            alert("Import realizat.");
+        } catch (e) {
+            alert("Eroare la import.");
+            console.error(e);
+        } finally {
+            importInput.value = "";
+        }
+    };
+    reader.readAsText(file);
+});
+
+// Start
+loadVideos();

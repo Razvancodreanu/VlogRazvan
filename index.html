@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ro">
 <head>
     <meta charset="utf-8" />
@@ -7,146 +7,139 @@
     <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-    <header class="topbar">
+    <header class="siteHeader">
         <h1>Vlogul lui Razvan</h1>
-
-        <div class="toolbar">
-            <input id="searchInput" class="input" placeholder="Caută titlu sau tag..." />
-
-            <select id="tagFilter" class="input">
-                <option value="">— Filtrează după tag —</option>
-            </select>
-
-            <select id="sortSelect" class="input">
-                <option value="newest">Noi → Vechi</option>
-                <option value="oldest">Vechi → Noi</option>
-                <option value="title">Titlu (A→Z)</option>
-            </select>
-
-            <span id="authBadge" class="muted"></span>
-            <button id="authBtn" class="btn">Autentificare</button>
-
-            <button id="btnAdd" class="btn primary">+ Adaugă clip</button>
-            <button id="btnExport" class="btn">Export</button>
-            <label class="btn">
-                Import
-                <input id="importInput" type="file" accept="application/json" hidden />
-            </label>
-        </div>
     </header>
 
+    <!-- Toolbar -->
+    <section class="toolbar">
+        <input id="searchInput" type="search" placeholder="Caută titlu sau tag..." />
+        <div class="selectGroup">
+            <button class="dropdown" id="tagFilter" aria-label="Filtrează după tag">— Filtrează după tag —</button>
+            <ul class="dropdownMenu" id="tagMenu" hidden></ul>
+        </div>
+        <select id="sortSelect" aria-label="Sortează">
+            <option value="newest">Noi → Vechi</option>
+            <option value="oldest">Vechi → Noi</option>
+            <option value="title">Titlu (A→Z)</option>
+        </select>
+
+        <div class="spacer"></div>
+
+        <button id="authBtn" class="ghost">Autentificare</button>
+        <button id="btnAdd" class="primary" hidden>+ Adaugă clip</button>
+        <button id="btnExport" class="ghost" hidden>Export</button>
+        <button id="btnImport" class="ghost" hidden>Import</button>
+        <input id="importInput" type="file" accept="application/json" hidden />
+    </section>
+
+    <!-- Banner (poți lăsa hidden sau îl poți afișa când vrei) -->
+    <section id="banner" class="banner" hidden>
+        Sfat: pentru clipurile <strong>.mp4 găzduite</strong> folosește un link direct (nu din PC). Linkurile YouTube sunt ideale.
+    </section>
+
+    <!-- Lista video -->
     <main class="content">
-        <div id="hint" class="hint" hidden>
-            <!-- Dacă vrei să revii la bannerul de hint, scoate atributul hidden -->
-            Sfat: pentru clipurile <b>.mp4 găzduite</b> folosește un link direct (nu din PC).
-            Linkurile YouTube sunt ideale.
-        </div>
-
         <div id="grid" class="grid"></div>
-
         <div class="center">
-            <button id="loadMore" class="btn" hidden>Încarcă mai multe</button>
+            <button id="loadMore" class="ghost" hidden>Încarcă mai multe</button>
         </div>
+        <p id="errorBox" class="error" hidden></p>
     </main>
 
-    <!-- Add / Edit dialog -->
+    <!-- Dialog Add/Edit -->
     <dialog id="addDialog" class="dialog">
         <form method="dialog" class="dialogBody">
             <header class="dialogHeader">
-                <h3 id="dlgTitle">Adaugă clip</h3>
-                <nav class="tabs">
-                    <button type="button" class="tab active" data-tab="link">Link YouTube / .mp4</button>
-                    <button type="button" class="tab" data-tab="upload">Upload .mp4</button>
-                </nav>
+                <h2 id="dlgTitle">Adaugă clip</h2>
+                <menu>
+                    <button id="saveBtn" class="primary" value="default">Salvează</button>
+                    <button class="ghost" value="cancel">Anulează</button>
+                </menu>
             </header>
 
-            <!-- Panel: LINK -->
-            <section id="panelLink">
-                <label>
-                    Titlu
-                    <input id="titleInput" class="input" placeholder="Titlu clip" />
+            <div class="tabs">
+                <button type="button" class="tab active" data-tab="youtube">Link YouTube / URL</button>
+                <button type="button" class="tab" data-tab="local">Fișier local (.mp4)</button>
+            </div>
+
+            <!-- Panou LINK -->
+            <section class="tabPanel" data-panel="youtube" style="display:block;">
+                <label class="fld">
+                    <span>Titlu</span>
+                    <input id="titleInput" type="text" placeholder="Titlul clipului" />
                 </label>
 
-                <label>
-                    URL (YouTube sau .mp4 găzduit)
-                    <input id="urlInput" class="input" placeholder="https://www.youtube.com/watch?v=..." />
+                <label class="fld">
+                    <span>YouTube / URL .mp4</span>
+                    <input id="urlInput" type="url" placeholder="https://youtu.be/..." />
                 </label>
 
-                <div class="row">
-                    <label>
-                        Data
-                        <input id="dateInput" class="input" type="date" />
+                <div class="grid2">
+                    <label class="fld">
+                        <span>Data</span>
+                        <input id="dateInput" type="date" />
                     </label>
-                    <label>
-                        Tag-uri (virgulă)
-                        <input id="tagsInput" class="input" placeholder="daily, vlog" />
+                    <label class="fld">
+                        <span>Tag-uri (separate prin virgulă)</span>
+                        <input id="tagsInput" type="text" placeholder="daily, intro" />
                     </label>
                 </div>
 
-                <label>
-                    Descriere
-                    <textarea id="descInput" class="input" rows="3" placeholder="Detalii clip (opțional)"></textarea>
+                <label class="fld">
+                    <span>Descriere</span>
+                    <textarea id="descInput" rows="3" placeholder="Descriere scurtă"></textarea>
                 </label>
             </section>
 
-            <!-- Panel: UPLOAD -->
-            <section id="panelUpload" style="display:none">
-                <div id="dropZone"
-                     class="dropZone"
-                     tabindex="0"
-                     aria-label="Trage fișierul .mp4 aici sau apasă pentru a-l alege">
-                    <div class="dzIcon">⬆️</div>
-                    <div class="dzText"><b>Trage aici fișierul .mp4</b> sau apasă pentru a-l alege din calculator</div>
+            <!-- Panou LOCAL -->
+            <section class="tabPanel" data-panel="local">
+                <div id="dropZone" class="dropZone">
+                    <strong>Trage și plasează un fișier .mp4 aici</strong>
+                    <span>sau</span>
+                    <button type="button" id="pickFile" class="ghost">Alege din calculator</button>
+                    <input id="fileInput" type="file" accept="video/mp4" hidden />
                 </div>
-
-                <!-- input ascuns – îl declanșăm din JS -->
-                <input id="fileInput" type="file" accept="video/mp4" hidden />
-
-                <div class="row" style="margin-top:.8rem">
-                    <label>
-                        Titlu
-                        <input id="uTitleInput" class="input" placeholder="Titlu clip" />
-                    </label>
-                    <label>
-                        Data
-                        <input id="uDateInput" class="input" type="date" />
-                    </label>
-                </div>
-
-                <label>
-                    Tag-uri (virgulă)
-                    <input id="uTagsInput" class="input" placeholder="daily, vlog" />
-                </label>
 
                 <progress id="uploadProgress" value="0" max="100" hidden></progress>
-                <div id="uploadInfo" class="muted"></div>
-            </section>
 
-            <footer class="dialogFooter">
-                <button value="cancel" class="btn ghost">Anulează</button>
-                <button id="saveBtn" value="default" class="btn primary">Salvează</button>
-            </footer>
+                <div class="grid2">
+                    <label class="fld">
+                        <span>Titlu</span>
+                        <input id="localTitleInput" type="text" placeholder="Titlul implicit e numele fișierului" />
+                    </label>
+                    <label class="fld">
+                        <span>Data</span>
+                        <input id="localDateInput" type="date" />
+                    </label>
+                </div>
+
+                <label class="fld">
+                    <span>Tag-uri (separate prin virgulă)</span>
+                    <input id="localTagsInput" type="text" placeholder="daily, vlog" />
+                </label>
+            </section>
         </form>
     </dialog>
 
-    <!-- Card template -->
+    <!-- Șablon card -->
     <template id="cardTpl">
         <article class="card">
             <div class="media"></div>
             <div class="meta">
                 <h3 class="title"></h3>
-                <p class="date muted"></p>
+                <p class="date"></p>
                 <p class="desc"></p>
                 <div class="tags"></div>
             </div>
-            <div class="cardActions">
+            <footer class="cardActions">
                 <button class="mini" data-action="edit">Editează</button>
                 <button class="mini danger" data-action="delete">Șterge</button>
-            </div>
+            </footer>
         </article>
     </template>
 
-    <!-- Firebase + app -->
+    <!-- App (ESM) -->
     <script type="module" src="app.js"></script>
 </body>
 </html>
