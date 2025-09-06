@@ -1,4 +1,59 @@
-﻿// ====== Mic „store” în localStorage ======
+﻿// --- IndexedDB helpers (local-only) ---
+const DB_NAME = 'vlograzvan';
+const STORE = 'files';
+
+function idbOpen() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = (e) => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(STORE)) {
+                db.createObjectStore(STORE);
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbPut(key, blob) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(blob, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function idbGet(key) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbDel(key) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function saveLocalBlob(file) {
+    const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    await idbPut(key, file);
+    return { key, mime: file.type || 'application/octet-stream' };
+}
+
+
+// ====== Mic „store” în localStorage ======
 const KEY = "vlogVideos";
 
 function loadVideos() {
@@ -61,11 +116,15 @@ const dateInput = document.getElementById("dateInput");
 const tagsInput = document.getElementById("tagsInput");
 const descInput = document.getElementById("descInput");
 
+// Vizibilitate (Link)
+const visLink = document.getElementById("visLink");
+
 // Inputs (Upload local)
 const fileInput = document.getElementById("fileInput");
 const uTitleInput = document.getElementById("uTitleInput");
 const uDateInput = document.getElementById("uDateInput");
 const uTagsInput = document.getElementById("uTagsInput");
+const visUpload = document.getElementById("visUpload");
 const prog = document.getElementById("uploadProgress");
 const progInfo = document.getElementById("uploadInfo");
 
@@ -126,7 +185,8 @@ function collectFilters() {
             (v.desc || "").toLowerCase().includes(q) ||
             (v.tags || []).some(t => t.toLowerCase().includes(q));
         const tagOk = !tag || (v.tags || []).map(t => t.toLowerCase()).includes(tag);
-        return inText && tagOk;
+        const visibleOk = isAdmin || ((v.visibility || 'public') === 'public');
+        return inText && tagOk && visibleOk;
     });
 
     if (sort === "newest") list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
@@ -182,14 +242,27 @@ function renderCard(v) {
         vid.controls = true;
         vid.src = v.url;
         media.appendChild(vid);
-    } else if (v.blobUrl) {
-        const vid = document.createElement("video");
-        vid.controls = true;
-        vid.src = v.blobUrl;
-        media.appendChild(vid);
+    } else if (v.localKey) {
+        media.textContent = "Se încarcă fișierul local...";
+        idbGet(v.localKey).then(blob => {
+            if (!blob) { media.textContent = "Fișier local indisponibil pe acest dispozitiv."; return; }
+            const url = URL.createObjectURL(blob);
+            if ((v.localMime || '').startsWith('image/')) {
+                const img = document.createElement('img'); img.src = url; img.style.maxWidth = '100%'; img.style.display = 'block'; media.innerHTML = ''; media.appendChild(img);
+            } else {
+                const vid = document.createElement('video'); vid.controls = true; vid.src = url; media.innerHTML = ''; media.appendChild(vid);
+            }
+        }).catch(() => { media.textContent = 'Eroare la fișierul local.'; });
     } else {
         media.textContent = "Adaugă un URL sau un fișier .mp4.";
     }
+
+    const badge = document.createElement("div");
+    badge.className = "muted";
+    badge.style.margin = ".4rem .9rem 0";
+    badge.style.fontSize = ".8rem";
+    badge.textContent = ((v.visibility || "public").toUpperCase());
+    node.insertBefore(badge, node.querySelector(".meta"));
 
     title.textContent = v.title || "Fără titlu";
     date.textContent = v.date ? `Data: ${formatDate(v.date)}` : "";
@@ -210,6 +283,7 @@ function renderCard(v) {
     eb.addEventListener("click", () => openEdit(v.id));
     db.addEventListener("click", () => {
         if (!confirm("Ștergi acest clip?")) return;
+        if (v.localKey) { try { idbDel(v.localKey); } catch (e) { } }
         videos = videos.filter(x => x.id !== v.id);
         saveVideos(videos);
         refreshTagFilter();
@@ -241,6 +315,8 @@ function openAdd() {
     dateInput.value = new Date().toISOString().slice(0, 10);
     tagsInput.value = "";
     descInput.value = "";
+    if (visLink) visLink.checked = true;
+    if (visUpload) visUpload.checked = true;
     // Reset Upload
     fileInput.value = "";
     uTitleInput.value = "";
@@ -260,6 +336,7 @@ function openEdit(id) {
     dateInput.value = v.date || new Date().toISOString().slice(0, 10);
     tagsInput.value = (v.tags || []).join(", ");
     descInput.value = v.desc || "";
+    if (visLink) visLink.checked = (v.visibility !== "private");
     dlg.showModal();
 }
 
@@ -274,6 +351,7 @@ saveBtn.addEventListener("click", (e) => {
         const date = dateInput.value || new Date().toISOString().slice(0, 10);
         const tags = tagsInput.value.split(",").map(s => s.trim()).filter(Boolean);
         const desc = (descInput.value || "").trim();
+        const visibility = visLink && visLink.checked ? "public" : "private";
 
         if (editId) {
             const idx = videos.findIndex(x => x.id === editId);
@@ -297,12 +375,14 @@ saveBtn.addEventListener("click", (e) => {
     const date = uDateInput.value || new Date().toISOString().slice(0, 10);
     const tags = uTagsInput.value.split(",").map(s => s.trim()).filter(Boolean);
 
-    const blobUrl = URL.createObjectURL(file);
+    const visibility = visUpload && visUpload.checked ? "public" : "private";
+
+    const { key, mime } = await saveLocalBlob(file);
     if (editId) {
         const idx = videos.findIndex(x => x.id === editId);
-        if (idx >= 0) videos[idx] = { ...videos[idx], title, blobUrl, url: "", date, tags, desc: "" };
+        if (idx >= 0) videos[idx] = { ...videos[idx], title, date, tags, desc: "", url: "", localKey: key, localMime: mime, visibility };
     } else {
-        videos.unshift({ id: Date.now(), title, blobUrl, url: "", date, tags, desc: "" });
+        videos.unshift({ id: Date.now(), title, date, tags, desc: "", url: "", localKey: key, localMime: mime, visibility });
     }
     saveVideos(videos);
     refreshTagFilter();
@@ -394,3 +474,327 @@ if (logoutBtn) {
 refreshAdminUI();
 refreshTagFilter();
 renderReset();
+
+
+
+
+
+
+
+STYLES.CSS =
+
+/* ===== Tema neagră (dark) — styles.css ===== */
+
+:root {
+    --bg: #0b0b0b;
+    --panel: #0f0f0f;
+    --panel - 2: #0c0c0c;
+    --text: #e5e7eb;
+    --text - muted: #b3b8c4;
+    --line: #222;
+    --line - 2: #333;
+    --primary: #3b82f6;
+    --danger: #ef4444;
+    --tag: #333;
+    --focus: #60a5fa;
+}
+
+* {
+    box- sizing: border - box;
+}
+
+html, body {
+    height: 100 %;
+}
+
+body {
+    margin: 0 auto;
+    max - width: 1100px;
+    padding: 1.2rem;
+    color: var(--text);
+    background: var(--bg);
+    font - family: system - ui, -apple - system, Segoe UI, Roboto, Ubuntu, "Noto Sans", sans - serif;
+    line - height: 1.4;
+}
+
+/* Titlu */
+h1 {
+    margin: .2rem 0 1rem;
+    font - size: 2.2rem;
+    font - weight: 800;
+}
+
+/* Utilitare */
+.muted {
+    color: var(--text - muted);
+}
+
+.spacer {
+    flex: 1;
+}
+
+/* Toolbar */
+.toolbar {
+    display: flex;
+    flex - wrap: wrap;
+    gap: .5rem;
+    align - items: center;
+    margin: 1rem 0;
+}
+
+/* Controale */
+input[type = "search"],
+    input[type = "text"],
+    input[type = "date"],
+    select {
+    background: #111;
+    border: 1px solid var(--line - 2);
+    color: #ddd;
+    padding: .55rem .75rem;
+    border - radius: .55rem;
+    outline: none;
+}
+
+input::placeholder {
+    color: #8a90a0;
+}
+
+select {
+    cursor: pointer;
+}
+
+input: focus, select: focus, textarea:focus {
+    border - color: var(--focus);
+    box - shadow: 0 0 0 3px #60a5fa22;
+}
+
+/* Butoane */
+button {
+    font: inherit;
+    color: inherit;
+}
+
+.ghost {
+    background: transparent;
+    border: 1px solid var(--line - 2);
+    color: #ddd;
+    padding: .48rem .75rem;
+    border - radius: .6rem;
+    cursor: pointer;
+}
+
+    .ghost:hover {
+    background: #141414;
+}
+
+.primary {
+    background: var(--primary);
+    border: 0;
+    color: #fff;
+    padding: .52rem .9rem;
+    border - radius: .6rem;
+    cursor: pointer;
+}
+
+    .primary:hover {
+    filter: brightness(1.05);
+}
+
+.mini {
+    padding: .35rem .6rem;
+    border - radius: .45rem;
+    border: 1px solid var(--line - 2);
+    background: transparent;
+    color: #ddd;
+    cursor: pointer;
+}
+
+.danger {
+    border - color: #803;
+    color: #fca5a5;
+}
+
+.mini:hover {
+    background: #151515;
+}
+
+/* Grid de carduri */
+.grid {
+    display: grid;
+    grid - template - columns: repeat(auto - fill, minmax(320px, 1fr));
+    gap: 1rem;
+    margin - top: 1rem;
+}
+
+/* Card */
+article.card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border - radius: 14px;
+    overflow: hidden;
+}
+
+.media iframe,
+.media video {
+    display: block;
+    width: 100 %;
+    aspect - ratio: 16 / 9;
+    border: 0;
+    background: #000;
+}
+
+.meta {
+    padding: .9rem;
+}
+
+    .meta.title {
+    margin: 0 0 .15rem;
+}
+
+    .meta.date {
+    margin: .15rem 0 0;
+}
+
+    .meta.desc {
+    margin: .35rem 0 0;
+}
+
+.tags {
+    display: flex;
+    gap: .35rem;
+    flex - wrap: wrap;
+    margin - top: .35rem;
+}
+
+.tag {
+    border: 1px solid var(--tag);
+    border - radius: 999px;
+    padding: .12rem .6rem;
+    font - size: .8rem;
+    color: #d1d5db;
+}
+
+/* Acțiuni card */
+.cardActions {
+    display: flex;
+    gap: .5rem;
+    padding: .75rem;
+    border - top: 1px solid var(--line);
+}
+
+/* Dialog (add/edit) */
+dialog {
+    max - width: 700px;
+    border: 1px solid var(--line - 2);
+    background: var(--panel - 2);
+    color: var(--text);
+    border - radius: 14px;
+    padding: 1rem 1.1rem;
+}
+
+dialog::backdrop {
+    background: #000a;
+}
+
+    dialog form {
+    display: grid;
+    gap: .7rem;
+}
+
+.row {
+    display: grid;
+    grid - template - columns: 1fr 1fr;
+    gap: .7rem;
+}
+
+textarea {
+    background: #111;
+    border: 1px solid var(--line - 2);
+    color: #ddd;
+    padding: .6rem;
+    border - radius: .6rem;
+    min - height: 90px;
+    resize: vertical;
+}
+
+/* Segmented (tab-uri) */
+.seg {
+    display: inline - flex;
+    border: 1px solid var(--line - 2);
+    border - radius: .6rem;
+    overflow: hidden;
+}
+
+    .seg button {
+    border: 0;
+    background: #0f0f0f;
+    color: #ddd;
+    padding: .5rem .8rem;
+    cursor: pointer;
+}
+
+        .seg button.active {
+    background: #1b1b1b;
+    color: #fff;
+}
+
+/* Progress upload */
+progress {
+    width: 100 %;
+    height: 10px;
+    accent - color: var(--primary);
+}
+
+/* DropZone pentru upload .mp4 */
+.dropZone {
+    border: 2px dashed var(--line - 2);
+    border - radius: 10px;
+    padding: 16px;
+    text - align: center;
+    display: flex;
+    flex - direction: column;
+    gap: .4rem;
+    align - items: center;
+    justify - content: center;
+    min - height: 110px;
+    background: #0f0f0f;
+}
+
+    .dropZone.drag {
+    border - color: #7dd3fc;
+    background: #0b1120;
+}
+
+    .dropZone strong {
+    color: #c7d2fe;
+}
+
+/* Responsive */
+@media(max - width: 700px) {
+    .row {
+        grid - template - columns: 1fr;
+    }
+
+    h1 {
+        font - size: 1.8rem;
+    }
+
+    .grid {
+        grid - template - columns: 1fr;
+    }
+}
+
+/* Scrollbar discret (Chromium/Edge) */
+*:: -webkit - scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+*:: -webkit - scrollbar - thumb {
+    background: #1f2937;
+    border - radius: 6px;
+}
+
+    *:: -webkit - scrollbar - thumb:hover {
+    background: #374151;
+}
