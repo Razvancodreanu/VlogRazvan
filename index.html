@@ -10,14 +10,7 @@
     <main>
         <h1>Vlogul lui Razvan</h1>
 
-        <!-- Auth local (parolă simplă) -->
-        <div id="authControls">
-            <button id="loginBtn" class="ghost">Autentificare</button>
-            <button id="logoutBtn" class="ghost" style="display:none">Ieșire</button>
-            <span id="who" class="muted"></span>
-        </div>
-
-        <!-- Bara de control -->
+        <!-- Toolbar -->
         <div class="toolbar">
             <input id="searchInput" type="search" placeholder="Caută titlu sau tag..." />
             <select id="tagFilter"><option value="">— Filtrează după tag —</option></select>
@@ -29,20 +22,22 @@
 
             <span class="spacer"></span>
 
-            <!-- admin local -->
+            <!-- Admin (vizibil doar când ești logat) -->
             <button id="btnAdd" class="primary" hidden>+ Adaugă clip</button>
-            <button id="btnExport" class="ghost" hidden>Export</button>
-            <button id="importBtn" class="ghost" hidden>Import</button>
-            <input id="importInput" type="file" accept="application/json" hidden />
+
+            <!-- Auth (Supabase magic link) -->
+            <button id="loginBtn" class="ghost">Autentificare</button>
+            <button id="logoutBtn" class="ghost" style="display:none">Ieșire</button>
+            <span id="who" class="muted"></span>
         </div>
 
-        <!-- Grilă clipuri -->
+        <!-- Grilă -->
         <section id="grid" class="grid"></section>
         <div style="text-align:center;margin:1rem 0;">
             <button id="loadMore" class="ghost" hidden>Încarcă mai multe</button>
         </div>
 
-        <!-- Dialog ADD/EDIT cu două opțiuni: Link / Upload -->
+        <!-- Dialog ADD/EDIT -->
         <dialog id="addDialog">
             <form method="dialog">
                 <h3 style="margin:.2rem 0">Clip nou / Editează</h3>
@@ -54,14 +49,17 @@
 
                 <!-- Panel: Link -->
                 <section id="panelLink">
-                    <label>Titlu <input id="titleInput" placeholder="Titlu clip" /></label>
+                    <label>
+                        Titlu
+                        <input id="titleInput" type="text" placeholder="Titlu clip" />
+                    </label>
                     <label>
                         URL (YouTube sau .mp4 găzduit)
-                        <input id="urlInput" placeholder="https://www.youtube.com/watch?v=..." />
+                        <input id="urlInput" type="url" placeholder="https://www.youtube.com/watch?v=..." />
                     </label>
                     <div class="row">
                         <label>Data <input id="dateInput" type="date" /></label>
-                        <label>Tag-uri (virgulă) <input id="tagsInput" placeholder="daily, vlog" /></label>
+                        <label>Tag-uri (virgulă) <input id="tagsInput" type="text" placeholder="daily, vlog" /></label>
                     </div>
                     <label>
                         Descriere
@@ -78,10 +76,10 @@
                     </label>
                     <label class="row"><input type="checkbox" id="chkPublicUpload"> Public</label>
                     <div class="row">
-                        <label>Titlu <input id="uTitleInput" placeholder="Titlu clip" /></label>
+                        <label>Titlu <input id="uTitleInput" type="text" placeholder="Titlu clip" /></label>
                         <label>Data <input id="uDateInput" type="date" /></label>
                     </div>
-                    <label>Tag-uri (virgulă) <input id="uTagsInput" placeholder="daily, vlog" /></label>
+                    <label>Tag-uri (virgulă) <input id="uTagsInput" type="text" placeholder="daily, vlog" /></label>
                     <progress id="uploadProgress" value="0" max="100" hidden></progress>
                     <div id="uploadInfo" class="muted"></div>
                 </section>

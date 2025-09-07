@@ -1,4 +1,4 @@
-﻿:roo:root {
+﻿:root {
     --bg: #0b0b0b;
     --panel: #0f0f0f;
     --panel-2: #0c0c0c;
@@ -46,28 +46,28 @@ h1 {
 .toolbar {
     display: flex;
     flex-wrap: wrap;
-    gap: .5rem;
+    gap: .8rem;
     align-items: center;
     margin: 1rem 0
 }
 
-input[type="search"], input[type="text"], input[type="date"], select, textarea {
+input, select, textarea {
     background: #111;
     border: 1px solid var(--line-2);
     color: #ddd;
-    padding: .55rem .75rem;
-    border-radius: .55rem;
+    padding: .7rem .9rem;
+    border-radius: 12px;
     outline: none
 }
 
-input::placeholder {
-    color: #8a90a0
-}
+    input::placeholder {
+        color: #8a90a0
+    }
 
-input:focus, select:focus, textarea:focus {
-    border-color: var(--focus);
-    box-shadow: 0 0 0 3px #60a5fa22
-}
+    input:focus, select:focus, textarea:focus {
+        border-color: var(--focus);
+        box-shadow: 0 0 0 3px #60a5fa22
+    }
 
 select {
     cursor: pointer
@@ -82,8 +82,8 @@ button {
     background: transparent;
     border: 1px solid var(--line-2);
     color: #ddd;
-    padding: .48rem .75rem;
-    border-radius: .6rem;
+    padding: .6rem .9rem;
+    border-radius: 12px;
     cursor: pointer
 }
 
@@ -95,8 +95,8 @@ button {
     background: var(--primary);
     border: 0;
     color: #fff;
-    padding: .52rem .9rem;
-    border-radius: .6rem;
+    padding: .7rem 1.1rem;
+    border-radius: 12px;
     cursor: pointer
 }
 
@@ -125,23 +125,31 @@ button {
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill,minmax(320px,1fr));
-    gap: 1rem;
+    gap: 1.4rem;
     margin-top: 1rem
 }
 
 article.card {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 14px;
-    overflow: hidden
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 12px 34px rgba(0,0,0,.35);
+    transition: transform .15s ease, box-shadow .15s ease;
 }
+
+    article.card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 18px 44px rgba(0,0,0,.45)
+    }
 
 .media iframe, .media video {
     display: block;
     width: 100%;
     aspect-ratio: 16/9;
     border: 0;
-    background: #000
+    background: #000;
+    border-bottom: 1px solid var(--line)
 }
 
 .meta {
@@ -152,15 +160,17 @@ article.card {
     display: flex;
     gap: .35rem;
     flex-wrap: wrap;
-    margin-top: .35rem
+    margin-top: .6rem
 }
 
 .tag {
     border: 1px solid var(--tag);
     border-radius: 999px;
-    padding: .12rem .6rem;
+    padding: .28rem .7rem;
     font-size: .8rem;
-    color: #d1d5db
+    color: #d1d5db;
+    background: #0f172a;
+    border-color: #283249
 }
 
 .cardActions {
@@ -225,32 +235,6 @@ progress {
     accent-color: var(--primary)
 }
 
-#authControls {
-    margin: 12px 0;
-    display: flex;
-    gap: 8px;
-    align-items: center
-}
-
-    #authControls button {
-        padding: 8px 12px;
-        border: 0;
-        border-radius: 10px;
-        font-weight: 600;
-        background: var(--primary);
-        color: #fff;
-        cursor: pointer
-    }
-
-        #authControls button:hover {
-            opacity: .9
-        }
-
-        #authControls button:focus {
-            outline: 2px solid #ffffff66;
-            outline-offset: 2px
-        }
-
 @media (max-width:700px) {
     .row {
         grid-template-columns: 1fr
@@ -265,7 +249,7 @@ progress {
     }
 }
 
-/* Scrollbar discret (Chromium/Edge) */
+/* Scrollbar discret */
 *::-webkit-scrollbar {
     width: 10px;
     height: 10px
