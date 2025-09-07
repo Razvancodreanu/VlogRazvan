@@ -439,3 +439,52 @@ if (logoutBtn) {
 refreshAdminUI();
 refreshTagFilter();
 renderReset();
+// ===== SUPABASE: inițializare + butoane Login/Logout =====
+const SUPABASE_URL = "https://njgvdvslmshwwwttbjzi.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qZ3ZkdnNsbXNod3d3dHRianppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcyMzE4ODgsImV4cCI6MjA3MjgwNzg4OH0.C0wWEbIefO8QxTiCNesHkyglgbxlw3SEq9ZwKr3YCUo";
+
+let supa = null;
+let supaUser = null;
+
+async function supaInit() {
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    supa = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    const { data: { session } } = await supa.auth.getSession();
+    supaUser = session?.user || null;
+
+    supa.auth.onAuthStateChange((_e, s) => {
+        supaUser = s?.user || null;
+        renderAuthUI();
+        if (typeof renderReset === "function") renderReset();
+    });
+}
+
+function renderAuthUI() {
+    const inBtn = document.getElementById('btnLogin');
+    const outBtn = document.getElementById('btnLogout');
+    if (!inBtn || !outBtn) return;
+    inBtn.style.display = supaUser ? "none" : "";
+    outBtn.style.display = supaUser ? "" : "none";
+}
+
+async function supaSignIn() {
+    const email = prompt("Email pentru logare (primești un link):");
+    if (!email) return;
+    const { error } = await supa.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.href }
+    });
+    if (error) alert(error.message);
+    else alert("Verifică emailul și apasă pe linkul primit.");
+}
+
+async function supaSignOut() { await supa.auth.signOut(); }
+// pornește după ce DOM-ul este încărcat
+document.addEventListener('DOMContentLoaded', async () => {
+    await supaInit();
+    renderAuthUI();
+    document.getElementById('btnLogin')?.addEventListener('click', supaSignIn);
+    document.getElementById('btnLogout')?.addEventListener('click', supaSignOut);
+});
+
