@@ -223,23 +223,50 @@
 
                 <!-- Panel: Link -->
                 <section id="panelLink">
-                    <label> Titlu <input id="titleInput" placeholder="Titlu clip" /> </label>
-                    <label> URL (YouTube sau .mp4 găzduit) <input id="urlInput" placeholder="https://www.youtube.com/watch?v=..." /> </label>
+                    <label>
+                        Titlu
+                        <input id="titleInput" placeholder="Titlu clip" />
+                    </label>
+                    <label>
+                        URL (YouTube sau .mp4 găzduit)
+                        <input id="urlInput" placeholder="https://www.youtube.com/watch?v=..." />
+                    </label>
                     <div class="row">
-                        <label> Data <input id="dateInput" type="date" /> </label>
-                        <label> Tag-uri (virgulă) <input id="tagsInput" placeholder="daily, vlog" /> </label>
+                        <label>
+                            Data
+                            <input id="dateInput" type="date" />
+                        </label>
+                        <label>
+                            Tag-uri (virgulă)
+                            <input id="tagsInput" placeholder="daily, vlog" />
+                        </label>
                     </div>
-                    <label> Descriere <textarea id="descInput" rows="3" placeholder="(opțional)"></textarea> </label>
+                    <label>
+                        Descriere
+                        <textarea id="descInput" rows="3" placeholder="(opțional)"></textarea>
+                    </label>
                 </section>
 
                 <!-- Panel: Upload -->
                 <section id="panelUpload" style="display:none">
-                    <label> Fișier .mp4 (se urcă în cloud) <input id="fileInput" type="file" accept="video/mp4" /> </label>
+                    <label>
+                        Fișier .mp4 (se urcă în cloud)
+                        <input id="fileInput" type="file" accept="video/mp4" />
+                    </label>
                     <div class="row">
-                        <label> Titlu <input id="uTitleInput" placeholder="Titlu clip" /> </label>
-                        <label> Data <input id="uDateInput" type="date" /> </label>
+                        <label>
+                            Titlu
+                            <input id="uTitleInput" placeholder="Titlu clip" />
+                        </label>
+                        <label>
+                            Data
+                            <input id="uDateInput" type="date" />
+                        </label>
                     </div>
-                    <label> Tag-uri (virgulă) <input id="uTagsInput" placeholder="daily, vlog" /> </label>
+                    <label>
+                        Tag-uri (virgulă)
+                        <input id="uTagsInput" placeholder="daily, vlog" />
+                    </label>
                     <progress id="uploadProgress" value="0" max="100" hidden></progress>
                     <div id="uploadInfo" class="muted"></div>
                 </section>
@@ -268,9 +295,6 @@
             </article>
         </template>
     </main>
-
-    <!-- ADĂUGAT: biblioteca supabase-js (nu schimbă UI) -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <script type="module" src="app.js"></script>
 </body>

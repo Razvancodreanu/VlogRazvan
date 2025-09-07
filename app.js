@@ -1,4 +1,4 @@
-﻿// --- IndexedDB helpers (local-only) --- (nefolosite acum, le păstrăm ca fallback)
+﻿// --- IndexedDB helpers (local-only) ---
 const DB_NAME = 'vlograzvan';
 const STORE = 'files';
 
@@ -15,6 +15,7 @@ function idbOpen() {
         req.onerror = () => reject(req.error);
     });
 }
+
 async function idbPut(key, blob) {
     const db = await idbOpen();
     return new Promise((resolve, reject) => {
@@ -24,6 +25,7 @@ async function idbPut(key, blob) {
         tx.onerror = () => reject(tx.error);
     });
 }
+
 async function idbGet(key) {
     const db = await idbOpen();
     return new Promise((resolve, reject) => {
@@ -33,19 +35,45 @@ async function idbGet(key) {
         req.onerror = () => reject(req.error);
     });
 }
-async function saveLocalBlob(file) { // fallback local
+
+async function saveLocalBlob(file) {
     const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     await idbPut(key, file);
     return { key, mime: file.type || 'application/octet-stream' };
 }
 
+
 // ====== Mic „store” în localStorage ======
 const KEY = "vlogVideos";
+
 function loadVideos() {
-    try { const raw = localStorage.getItem(KEY); if (!raw) return []; return JSON.parse(raw); }
-    catch { return []; }
+    try {
+        const raw = localStorage.getItem(KEY);
+        if (!raw) return [];
+        return JSON.parse(raw);
+    } catch {
+        return [];
+    }
 }
-function saveVideos(v) { localStorage.setItem(KEY, JSON.stringify(v)); }
+function saveVideos(videos) {
+    localStorage.setItem(KEY, JSON.stringify(videos));
+}
+
+// Dacă vrei seed la prima rulare, decomentează:
+/*
+let videos = loadVideos();
+if (videos.length === 0) {
+  videos = [{
+    id: Date.now(),
+    title: "Primul vlog – salut!",
+    url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    date: new Date().toISOString().slice(0,10),
+    desc: "Exemplu. Înlocuiește cu clipurile tale.",
+    tags: ["daily","intro"]
+  }];
+  saveVideos(videos);
+}
+*/
 let videos = loadVideos();
 
 // ====== Elemente din DOM ======
@@ -96,51 +124,6 @@ let editId = null;
 let activeTab = "link";
 const PAGE_SIZE = 9;
 
-// ====== Supabase (ADĂUGAT) ======
-const SUPABASE_URL = "https://<PROJECT>.supabase.co";          // ⬅️ completează
-const SUPABASE_ANON_KEY = "<ANON_PUBLIC_KEY>";                 // ⬅️ completează
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// Varianta 2: două bucket-uri
-const PUB_BUCKET = "videos_public";   // citire publică (URL stabil)
-const PRIV_BUCKET = "videos_private";  // citire privată (folosește semnare la redare, dacă e setat privat în Storage)
-
-// Helpers vizibilitate prin tag-uri „privat/private”
-function hasPrivateTag(tagsArr) {
-    return (tagsArr || []).some(t => {
-        const x = (t || "").toLowerCase().trim().replace("#", "");
-        return x === "privat" || x === "private";
-    });
-}
-// nume sigur
-function safeName(name) {
-    return (name || "file.mp4").replace(/[^\w.\-]+/g, "_");
-}
-// upload către bucket corect
-async function uploadMp4ToSupabase(file, tagsArr, onProgress) {
-    const isPriv = hasPrivateTag(tagsArr);
-    const bucket = isPriv ? PRIV_BUCKET : PUB_BUCKET;
-    const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${safeName(file.name)}`;
-
-    const { data, error } = await sb.storage.from(bucket).upload(path, file, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: file.type || "video/mp4",
-        onUploadProgress: onProgress ? ({ loaded, total }) => onProgress(loaded, total) : undefined
-    });
-    if (error) throw error;
-
-    // Pentru public: URL stabil; pentru privat: îl vom semna la redare
-    const publicUrl = sb.storage.from(bucket).getPublicUrl(path).data.publicUrl;
-    return { bucket, path, publicUrl, isPrivate: isPriv };
-}
-// link semnat (dacă PRIV_BUCKET e cu read privat)
-async function getSignedUrl(bucket, path, seconds = 60 * 60 * 24) {
-    const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, seconds);
-    if (error) throw error;
-    return data.signedUrl;
-}
-
 // ====== Helpers ======
 function isYouTube(u) {
     try {
@@ -174,7 +157,8 @@ function uniqueTags(list) {
 function refreshTagFilter() {
     const prev = tagFilter.value || "";
     const tags = uniqueTags(videos);
-    tagFilter.innerHTML = `<option value="">— Filtrează după tag —</option>` + tags.map(t => `<option value="${t}">${t}</option>`).join("");
+    tagFilter.innerHTML = `<option value="">— Filtrează după tag —</option>` +
+        tags.map(t => `<option value="${t}">${t}</option>`).join("");
     if (tags.includes(prev)) tagFilter.value = prev;
 }
 function collectFilters() {
@@ -183,12 +167,9 @@ function collectFilters() {
     const sort = (sortSelect.value || "newest");
 
     let list = videos.filter(v => {
-        // (ADĂUGAT) ascunde private pentru vizitatori
-        if (!isAdmin && v.isPrivate) return false;
-
-        const inText = (v.title || "").toLowerCase().includes(q)
-            || (v.desc || "").toLowerCase().includes(q)
-            || (v.tags || []).some(t => t.toLowerCase().includes(q));
+        const inText = (v.title || "").toLowerCase().includes(q) ||
+            (v.desc || "").toLowerCase().includes(q) ||
+            (v.tags || []).some(t => t.toLowerCase().includes(q));
         const tagOk = !tag || (v.tags || []).map(t => t.toLowerCase()).includes(tag);
         return inText && tagOk;
     });
@@ -196,8 +177,10 @@ function collectFilters() {
     if (sort === "newest") list.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
     else if (sort === "oldest") list.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     else if (sort === "title") list.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+
     return list;
 }
+
 function sanitize(name) {
     return name.toLowerCase().replace(/[^\w.-]+/g, '-').replace(/-+/g, '-').slice(0, 80);
 }
@@ -244,24 +227,7 @@ function renderCard(v) {
         vid.controls = true;
         vid.src = v.url;
         media.appendChild(vid);
-    } else if (v.bucket && v.path) {
-        // ADĂUGAT: .mp4 din Supabase
-        const vid = document.createElement("video");
-        vid.controls = true;
-        media.appendChild(vid);
-        (async () => {
-            try {
-                const src = v.isPrivate
-                    ? await getSignedUrl(v.bucket, v.path, 60 * 60 * 24) // 24h
-                    : sb.storage.from(v.bucket).getPublicUrl(v.path).data.publicUrl;
-                vid.src = src;
-                vid.load();
-            } catch (e) {
-                console.error("Nu pot genera URL video:", e);
-                media.textContent = "Video indisponibil.";
-            }
-        })();
-    } else if (v.blobUrl) { // fallback (legacy)
+    } else if (v.blobUrl) {
         const vid = document.createElement("video");
         vid.controls = true;
         vid.src = v.blobUrl;
@@ -287,16 +253,8 @@ function renderCard(v) {
     db.style.display = isAdmin ? "" : "none";
 
     eb.addEventListener("click", () => openEdit(v.id));
-    db.addEventListener("click", async () => {
+    db.addEventListener("click", () => {
         if (!confirm("Ștergi acest clip?")) return;
-        // ADĂUGAT: șterge și din Storage dacă este fișier urcat
-        try {
-            if (v.bucket && v.path) {
-                await sb.storage.from(v.bucket).remove([v.path]);
-            }
-        } catch (e) {
-            console.warn("Avertisment: fișierul nu a putut fi șters din Storage:", e);
-        }
         videos = videos.filter(x => x.id !== v.id);
         saveVideos(videos);
         refreshTagFilter();
@@ -350,7 +308,7 @@ function openEdit(id) {
     dlg.showModal();
 }
 
-saveBtn.addEventListener("click", async (e) => {
+saveBtn.addEventListener("click", (e) => {
     e.preventDefault();
     if (!isAdmin) return alert("Doar adminul poate salva.");
 
@@ -361,13 +319,12 @@ saveBtn.addEventListener("click", async (e) => {
         const date = dateInput.value || new Date().toISOString().slice(0, 10);
         const tags = tagsInput.value.split(",").map(s => s.trim()).filter(Boolean);
         const desc = (descInput.value || "").trim();
-        const isPrivate = hasPrivateTag(tags);
 
         if (editId) {
             const idx = videos.findIndex(x => x.id === editId);
-            if (idx >= 0) videos[idx] = { ...videos[idx], title, url, date, tags, desc, blobUrl: "", isPrivate };
+            if (idx >= 0) videos[idx] = { ...videos[idx], title, url, date, tags, desc, blobUrl: "" };
         } else {
-            videos.unshift({ id: Date.now(), title, url, date, tags, desc, blobUrl: "", isPrivate });
+            videos.unshift({ id: Date.now(), title, url, date, tags, desc, blobUrl: "" });
         }
         saveVideos(videos);
         refreshTagFilter();
@@ -376,7 +333,7 @@ saveBtn.addEventListener("click", async (e) => {
         return;
     }
 
-    // === Upload .mp4 în Supabase (înlocuiește blobUrl local) ===
+    // Upload local .mp4 (nu cloud)
     const file = fileInput.files?.[0];
     if (!file) { alert("Alege un fișier .mp4"); return; }
     if (file.type !== "video/mp4") { alert("Accept doar .mp4"); return; }
@@ -385,42 +342,17 @@ saveBtn.addEventListener("click", async (e) => {
     const date = uDateInput.value || new Date().toISOString().slice(0, 10);
     const tags = uTagsInput.value.split(",").map(s => s.trim()).filter(Boolean);
 
-    // progres UI
-    prog.hidden = false; prog.value = 0; prog.max = 100; progInfo.textContent = "Urc...";
-    const onProg = (loaded, total) => {
-        if (!total) return;
-        prog.max = total; prog.value = loaded;
-        progInfo.textContent = `Urc: ${Math.round(loaded / 1024 / 1024)} / ${Math.round(total / 1024 / 1024)} MB`;
-    };
-
-    try {
-        const meta = await uploadMp4ToSupabase(file, tags, onProg); // {bucket, path, publicUrl, isPrivate}
-        const item = {
-            id: editId || Date.now(),
-            title,
-            url: meta.isPrivate ? "" : meta.publicUrl, // public: URL stabil; privat: semnăm la redare
-            date,
-            tags,
-            desc: "",
-            bucket: meta.bucket,
-            path: meta.path,
-            isPrivate: meta.isPrivate
-        };
-        if (editId) {
-            const idx = videos.findIndex(x => x.id === editId);
-            if (idx >= 0) videos[idx] = { ...videos[idx], ...item };
-        } else {
-            videos.unshift(item);
-        }
-        saveVideos(videos);
-        refreshTagFilter();
-        dlg.close();
-        renderReset();
-    } catch (err) {
-        alert("Eroare la upload: " + err.message);
-    } finally {
-        prog.hidden = true; prog.value = 0; progInfo.textContent = "";
+    const blobUrl = URL.createObjectURL(file);
+    if (editId) {
+        const idx = videos.findIndex(x => x.id === editId);
+        if (idx >= 0) videos[idx] = { ...videos[idx], title, blobUrl, url: "", date, tags, desc: "" };
+    } else {
+        videos.unshift({ id: Date.now(), title, blobUrl, url: "", date, tags, desc: "" });
     }
+    saveVideos(videos);
+    refreshTagFilter();
+    dlg.close();
+    renderReset();
 });
 
 // ====== Căutare/filtre/paginare ======
@@ -452,13 +384,10 @@ if (importInput) importInput.addEventListener("change", () => {
                 id: x.id || Date.now() + Math.random(),
                 title: x.title || "Fără titlu",
                 url: x.url || "",
-                blobUrl: "", // nu mai folosim blob local
+                blobUrl: x.blobUrl || "",
                 date: x.date || new Date().toISOString().slice(0, 10),
                 desc: x.desc || "",
-                tags: Array.isArray(x.tags) ? x.tags.filter(Boolean) : [],
-                bucket: x.bucket || undefined,
-                path: x.path || undefined,
-                isPrivate: !!x.isPrivate
+                tags: Array.isArray(x.tags) ? x.tags.filter(Boolean) : []
             }));
             videos = cleaned;
             saveVideos(videos);
@@ -476,6 +405,7 @@ if (importInput) importInput.addEventListener("change", () => {
 // ====== Admin local (fără Firebase) ======
 const ADMIN_FLAG = "vlogAdmin"; // 1 = logat
 isAdmin = localStorage.getItem(ADMIN_FLAG) === "1";
+
 function refreshAdminUI() {
     if (btnAdd) btnAdd.hidden = !isAdmin;
     if (btnExport) btnExport.hidden = !isAdmin;
@@ -484,6 +414,7 @@ function refreshAdminUI() {
     if (logoutBtn) logoutBtn.style.display = isAdmin ? "" : "none";
     if (who) who.textContent = isAdmin ? "(Mod admin local)" : "";
 }
+
 if (loginBtn) {
     loginBtn.addEventListener("click", () => {
         const pass = prompt("Parola admin (local)");
@@ -491,7 +422,6 @@ if (loginBtn) {
             isAdmin = true;
             localStorage.setItem(ADMIN_FLAG, "1");
             refreshAdminUI();
-            renderReset();
         } else if (pass !== null) {
             alert("Parolă greșită.");
         }
@@ -502,7 +432,6 @@ if (logoutBtn) {
         isAdmin = false;
         localStorage.removeItem(ADMIN_FLAG);
         refreshAdminUI();
-        renderReset();
     });
 }
 
@@ -510,3 +439,6 @@ if (logoutBtn) {
 refreshAdminUI();
 refreshTagFilter();
 renderReset();
+
+
+
