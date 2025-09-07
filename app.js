@@ -204,6 +204,7 @@ function renderMore() {
 function renderCard(v) {
     const tpl = document.getElementById("cardTpl");
     const node = tpl.content.firstElementChild.cloneNode(true);
+    node.dataset.id = v.id;
 
     const media = node.querySelector(".media");
     const title = node.querySelector(".title");
@@ -306,6 +307,7 @@ function openEdit(id) {
     dateInput.value = v.date || new Date().toISOString().slice(0, 10);
     tagsInput.value = (v.tags || []).join(", ");
     descInput.value = v.desc || "";
+    window.editRow = v;
     dlg.showModal();
 }
 
@@ -335,8 +337,10 @@ saveBtn.addEventListener("click", async (e) => {
                 const tags = (uTagsInput.value || "").split(",").map(s => s.trim()).filter(Boolean);
                 const isPublic = document.getElementById("chkPublicUpload")?.checked ?? false;
 
+
                 await supaUploadMp4(file, isPublic, { title, tags, date, description: "" });
             }
+
 
             dlg.close();
             if (typeof renderReset === "function") await renderReset();
@@ -609,39 +613,87 @@ async function supaGetPlayableUrl(row) {
     return data.signedUrl;
 }
 // ====== Încarcă date pentru grilă (Cloud dacă există, altfel fallback local) ======
+// Încarcă datele pentru grilă DOAR din Supabase (cloud only)
 async function loadForGrid() {
     if (supa) {
         const rows = await supaListVideos({ limit: 200 });
-
         const out = [];
+
         for (const r of rows) {
             let url = r.source_url || null;
 
-            // dacă e fișier încărcat în Storage, generează URL semnat (valabil 12h)
+            // dacă e fișier în Storage, generează URL semnat (valabil 12h)
             if (!url && r.storage_path) {
                 const objectName = r.storage_path.replace(/^videos\//, '');
-                const { data, error } = await supa.storage
+                const { data } = await supa.storage
                     .from('videos')
                     .createSignedUrl(objectName, 60 * 60 * 12);
-                if (!error) url = data.signedUrl;
+                url = data?.signedUrl || null;
             }
 
             out.push({
                 id: r.id,
                 title: r.title,
-                url,                          // acum randarea ta existentă pentru .mp4 va funcționa
+                url,
                 date: r.recorded_on,
                 tags: r.tags,
                 desc: r.description,
                 is_public: r.is_public,
                 storage_path: r.storage_path,
-                owner: r.owner
+                owner: r.owner,
             });
         }
+
         return out;
     }
 
-    // fallback: vechiul tău loader local
-    return loadVideos();
+    // dacă Supabase nu e inițializat / nu ești logat, nu afișăm nimic
+    return [];
+}
+// ===== Ștergere din Supabase (rând + fișier din Storage dacă există) =====
+async function supaDeleteVideo(row) {
+    if (!row?.id) throw new Error("Lipsește id-ul videoclipului.");
+    // șterge fișierul din Storage, dacă există
+    if (row.storage_path) {
+        const objectName = row.storage_path.replace(/^videos\//, '');
+        try { await supa.storage.from('videos').remove([objectName]); } catch { }
+    }
+    // șterge rândul din tabel
+    const { error } = await supa.from('videos').delete().eq('id', row.id);
+    if (error) throw error;
 }
 
+
+const grid = document.getElementById('grid');
+
+grid.addEventListener('click', async (e) => {
+    const card = e.target.closest('article.card');
+    if (!card) return;
+    const id = card.dataset.id;
+
+    // === ȘTERGE ===
+    const delBtn = e.target.closest('[data-action="delete"]');
+    if (delBtn) {
+        e.preventDefault();
+        if (!confirm('Sigur ștergi acest clip?')) return;
+
+        const row = videos.find(v => String(v.id) === String(id));
+        if (supa && supaUser && row) {
+            try {
+                await supaDeleteVideo(row);   // funcția pe care ai pus-o la final
+                await renderReset();          // reîncarcă grila din cloud
+            } catch (err) {
+                console.error(err);
+                alert(err?.message || 'Eroare la ștergere');
+            }
+        }
+        return;
+    }
+
+    // === EDIT ===
+    const editBtn = e.target.closest('[data-action="edit"]');
+    if (editBtn) {
+        e.preventDefault();
+        openEdit(id); // deschide dialogul cu datele rândului
+    }
+});
