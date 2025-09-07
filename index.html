@@ -5,13 +5,182 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Vlogul lui Razvan</title>
     <link rel="stylesheet" href="styles.css" />
+    <style>
+        body {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 1.2rem;
+            color: #e5e7eb;
+            background: #0b0b0b;
+            font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Noto Sans",sans-serif
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            margin: .2rem 0 1rem
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .5rem;
+            align-items: center;
+            margin: 1rem 0
+        }
+
+        .spacer {
+            flex: 1
+        }
+
+        .muted {
+            opacity: .7
+        }
+
+        .ghost {
+            background: transparent;
+            border: 1px solid #333;
+            padding: .45rem .7rem;
+            border-radius: .55rem;
+            color: #ddd;
+            cursor: pointer
+        }
+
+        .primary {
+            background: #3b82f6;
+            border: 0;
+            color: #fff;
+            padding: .5rem .85rem;
+            border-radius: .6rem;
+            cursor: pointer
+        }
+
+        input, select {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: .55rem;
+            color: #ddd;
+            padding: .5rem .7rem
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill,minmax(320px,1fr));
+            gap: 1rem;
+            margin-top: 1rem
+        }
+
+        article.card {
+            background: #0f0f0f;
+            border: 1px solid #222;
+            border-radius: 14px;
+            overflow: hidden
+        }
+
+        .media iframe, .media video {
+            display: block;
+            width: 100%;
+            aspect-ratio: 16/9;
+            border: 0;
+            background: #000
+        }
+
+        .meta {
+            padding: .8rem
+        }
+
+        .tags {
+            display: flex;
+            gap: .35rem;
+            flex-wrap: wrap;
+            margin-top: .35rem
+        }
+
+        .tag {
+            border: 1px solid #333;
+            border-radius: 999px;
+            padding: .1rem .55rem;
+            font-size: .8rem
+        }
+
+        .cardActions {
+            display: flex;
+            gap: .5rem;
+            padding: .75rem;
+            border-top: 1px solid #222
+        }
+
+        .mini {
+            padding: .35rem .6rem;
+            border-radius: .45rem;
+            border: 1px solid #333;
+            background: transparent;
+            color: #ddd;
+            cursor: pointer
+        }
+
+        .danger {
+            border-color: #803;
+            color: #f99
+        }
+
+        dialog {
+            max-width: 700px;
+            border: 1px solid #333;
+            background: #0c0c0c;
+            color: #e5e7eb;
+            border-radius: 14px
+        }
+
+            dialog form {
+                display: grid;
+                gap: .7rem
+            }
+
+        textarea {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: .6rem;
+            color: #ddd;
+            padding: .6rem
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: .7rem
+        }
+
+        .seg {
+            display: inline-flex;
+            border: 1px solid #333;
+            border-radius: .6rem;
+            overflow: hidden
+        }
+
+            .seg button {
+                border: 0;
+                background: #0f0f0f;
+                color: #ddd;
+                padding: .5rem .8rem;
+                cursor: pointer
+            }
+
+                .seg button.active {
+                    background: #1b1b1b
+                }
+
+        progress {
+            width: 100%
+        }
+    </style>
 </head>
 <body>
     <main>
         <h1>Vlogul lui Razvan</h1>
 
-        <!-- Toolbar -->
+        <!-- Bara de control -->
         <div class="toolbar">
+            <!-- vizibil pentru toți -->
             <input id="searchInput" type="search" placeholder="Caută titlu sau tag..." />
             <select id="tagFilter"><option value="">— Filtrează după tag —</option></select>
             <select id="sortSelect">
@@ -22,22 +191,27 @@
 
             <span class="spacer"></span>
 
-            <!-- Admin (vizibil doar când ești logat) -->
+            <!-- admin only (ascunse implicit) -->
             <button id="btnAdd" class="primary" hidden>+ Adaugă clip</button>
+            <button id="btnExport" class="ghost" hidden>Export</button>
+            <button id="importBtn" class="ghost" hidden>Import</button>
+            <input id="importInput" type="file" accept="application/json" hidden />
 
-            <!-- Auth (Supabase magic link) -->
-            <button id="loginBtn" class="ghost">Autentificare</button>
-            <button id="logoutBtn" class="ghost" style="display:none">Ieșire</button>
-            <span id="who" class="muted"></span>
+            <!-- auth -->
+            <div style="display:flex;gap:.5rem;align-items:center;margin-left:.3rem">
+                <button id="loginBtn" class="ghost">Autentificare</button>
+                <button id="logoutBtn" class="ghost" style="display:none">Ieșire</button>
+                <span id="who" class="muted"></span>
+            </div>
         </div>
 
-        <!-- Grilă -->
+        <!-- Grilă clipuri -->
         <section id="grid" class="grid"></section>
         <div style="text-align:center;margin:1rem 0;">
             <button id="loadMore" class="ghost" hidden>Încarcă mai multe</button>
         </div>
 
-        <!-- Dialog ADD/EDIT -->
+        <!-- Dialog ADD/EDIT cu două opțiuni: Link / Upload -->
         <dialog id="addDialog">
             <form method="dialog">
                 <h3 style="margin:.2rem 0">Clip nou / Editează</h3>
@@ -51,21 +225,26 @@
                 <section id="panelLink">
                     <label>
                         Titlu
-                        <input id="titleInput" type="text" placeholder="Titlu clip" />
+                        <input id="titleInput" placeholder="Titlu clip" />
                     </label>
                     <label>
                         URL (YouTube sau .mp4 găzduit)
-                        <input id="urlInput" type="url" placeholder="https://www.youtube.com/watch?v=..." />
+                        <input id="urlInput" placeholder="https://www.youtube.com/watch?v=..." />
                     </label>
                     <div class="row">
-                        <label>Data <input id="dateInput" type="date" /></label>
-                        <label>Tag-uri (virgulă) <input id="tagsInput" type="text" placeholder="daily, vlog" /></label>
+                        <label>
+                            Data
+                            <input id="dateInput" type="date" />
+                        </label>
+                        <label>
+                            Tag-uri (virgulă)
+                            <input id="tagsInput" placeholder="daily, vlog" />
+                        </label>
                     </div>
                     <label>
                         Descriere
                         <textarea id="descInput" rows="3" placeholder="(opțional)"></textarea>
                     </label>
-                    <label class="row"><input type="checkbox" id="chkPublicLink"> Public</label>
                 </section>
 
                 <!-- Panel: Upload -->
@@ -74,12 +253,20 @@
                         Fișier .mp4 (se urcă în cloud)
                         <input id="fileInput" type="file" accept="video/mp4" />
                     </label>
-                    <label class="row"><input type="checkbox" id="chkPublicUpload"> Public</label>
                     <div class="row">
-                        <label>Titlu <input id="uTitleInput" type="text" placeholder="Titlu clip" /></label>
-                        <label>Data <input id="uDateInput" type="date" /></label>
+                        <label>
+                            Titlu
+                            <input id="uTitleInput" placeholder="Titlu clip" />
+                        </label>
+                        <label>
+                            Data
+                            <input id="uDateInput" type="date" />
+                        </label>
                     </div>
-                    <label>Tag-uri (virgulă) <input id="uTagsInput" type="text" placeholder="daily, vlog" /></label>
+                    <label>
+                        Tag-uri (virgulă)
+                        <input id="uTagsInput" placeholder="daily, vlog" />
+                    </label>
                     <progress id="uploadProgress" value="0" max="100" hidden></progress>
                     <div id="uploadInfo" class="muted"></div>
                 </section>
@@ -97,8 +284,8 @@
                 <div class="media"></div>
                 <div class="meta">
                     <h3 class="title"></h3>
-                    <p class="date muted"></p>
-                    <p class="desc"></p>
+                    <p class="date muted" style="margin:.2rem 0 0"></p>
+                    <p class="desc" style="margin:.35rem 0 0"></p>
                     <div class="tags"></div>
                 </div>
                 <div class="cardActions">
@@ -112,3 +299,4 @@
     <script type="module" src="app.js"></script>
 </body>
 </html>
+
