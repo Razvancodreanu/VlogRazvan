@@ -10,10 +10,11 @@
     <main>
         <h1>Vlogul lui Razvan</h1>
 
-        <!-- Auth Supabase (email magic link) -->
+        <!-- Auth local (parolă simplă) -->
         <div id="authControls">
-            <button id="btnLogin">Loghează-te</button>
-            <button id="btnLogout" style="display:none">Delogare</button>
+            <button id="loginBtn" class="ghost">Autentificare</button>
+            <button id="logoutBtn" class="ghost" style="display:none">Ieșire</button>
+            <span id="who" class="muted"></span>
         </div>
 
         <!-- Bara de control -->
@@ -28,17 +29,11 @@
 
             <span class="spacer"></span>
 
-            <!-- admin local (parolă simplă) -->
+            <!-- admin local -->
             <button id="btnAdd" class="primary" hidden>+ Adaugă clip</button>
             <button id="btnExport" class="ghost" hidden>Export</button>
             <button id="importBtn" class="ghost" hidden>Import</button>
             <input id="importInput" type="file" accept="application/json" hidden />
-
-            <div style="display:flex;gap:.5rem;align-items:center;margin-left:.3rem">
-                <button id="loginBtn" class="ghost">Autentificare</button>
-                <button id="logoutBtn" class="ghost" style="display:none">Ieșire</button>
-                <span id="who" class="muted"></span>
-            </div>
         </div>
 
         <!-- Grilă clipuri -->

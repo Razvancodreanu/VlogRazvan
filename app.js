@@ -1,20 +1,9 @@
-﻿/* ===== Stocare locală (fallback) ===== */
-const DB_NAME = 'vlograzvan';
-const STORE = 'files';
-const KEY = 'vlogVideos';
-
-function idbOpen() {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, 1);
-        req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE); };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
-}
-async function idbPut(key, blob) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(blob, key); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
-async function idbGet(key) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(STORE, 'readonly'); const r = tx.objectStore(STORE).get(key); r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error); }); }
+﻿/* ===== Local store (ca înainte) ===== */
+const DB_NAME = 'vlograzvan', STORE = 'files', KEY = 'vlogVideos';
+function idbOpen() { return new Promise((res, rej) => { const r = indexedDB.open(DB_NAME, 1); r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE) }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbPut(k, blob) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(blob, k); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+async function idbGet(k) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction(STORE, 'readonly'); const rq = tx.objectStore(STORE).get(k); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => rej(rq.error); }); }
 async function saveLocalBlob(file) { const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`; await idbPut(key, file); return { key, mime: file.type || 'application/octet-stream' }; }
-
 function loadVideos() { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : [] } catch { return [] } }
 function saveVideos(v) { localStorage.setItem(KEY, JSON.stringify(v)) }
 let videos = loadVideos();
@@ -30,7 +19,7 @@ const importBtn = document.getElementById('importBtn');
 const importInput = document.getElementById('importInput');
 const loadMoreBtn = document.getElementById('loadMore');
 
-const loginBtn = document.getElementById('loginBtn');      // admin local
+const loginBtn = document.getElementById('loginBtn'); // admin local
 const logoutBtn = document.getElementById('logoutBtn');
 const who = document.getElementById('who');
 
@@ -50,6 +39,8 @@ const fileInput = document.getElementById('fileInput');
 const uTitleInput = document.getElementById('uTitleInput');
 const uDateInput = document.getElementById('uDateInput');
 const uTagsInput = document.getElementById('uTagsInput');
+const chkPublicLink = document.getElementById('chkPublicLink');
+const chkPublicUpload = document.getElementById('chkPublicUpload');
 const prog = document.getElementById('uploadProgress');
 const progInfo = document.getElementById('uploadInfo');
 
@@ -57,11 +48,9 @@ const saveBtn = document.getElementById('saveBtn');
 
 /* ===== State ===== */
 let isAdmin = false;
-let currentList = [];
-let renderedCount = 0;
-let editId = null;
+let currentList = [], renderedCount = 0;
+let editId = null, editRow = null;
 let activeTab = 'link';
-let editRow = null; // reține rândul curent când editezi (cloud)
 const PAGE_SIZE = 9;
 
 /* ===== Helpers ===== */
@@ -71,13 +60,103 @@ function formatDate(s) { try { return new Date(s + 'T00:00:00').toLocaleDateStri
 function uniqueTags(list) { const set = new Set(); list.forEach(v => (v.tags || []).forEach(t => set.add(t))); return [...set].sort((a, b) => a.localeCompare(b)) }
 function refreshTagFilter() { const prev = tagFilter.value || ''; const tags = uniqueTags(videos); tagFilter.innerHTML = `<option value="">— Filtrează după tag —</option>` + tags.map(t => `<option value="${t}">${t}</option>`).join(''); if (tags.includes(prev)) tagFilter.value = prev; }
 function collectFilters() { const q = (searchInput.value || '').trim().toLowerCase(); const tag = (tagFilter.value || '').trim().toLowerCase(); const sort = (sortSelect.value || 'newest'); let list = videos.filter(v => { const inText = (v.title || '').toLowerCase().includes(q) || (v.desc || '').toLowerCase().includes(q) || (v.tags || []).some(t => t.toLowerCase().includes(q)); const tagOk = !tag || (v.tags || []).map(t => t.toLowerCase()).includes(tag); return inText && tagOk; }); if (sort === 'newest') list.sort((a, b) => (b.date || '').localeCompare(a.date || '')); else if (sort === 'oldest') list.sort((a, b) => (a.date || '').localeCompare(b.date || '')); else if (sort === 'title') list.sort((a, b) => (a.title || '').localeCompare(b.title || '')); return list; }
-function sanitize(name) { return name.toLowerCase().replace(/[^\w.-]+/g, '-').replace(/-+/g, '-').slice(0, 80); }
-function canEdit(v) { return isAdmin || (supaUser && v.owner && v.owner === supaUser.id); }
+function canEdit(v) { // admin local sau clip local sau clip cloud fără owner (dacă politicile permit)
+    return isAdmin || !v.cloud || !v.owner || v.owner === 'anon';
+}
+
+/* ===== Supabase (fără login Supabase; doar ANON) ===== */
+const SUPABASE_URL = 'https://njgvdvslmshwwwttbjzi.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qZ3ZkdnNsbXNod3d3dHRianppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcyMzE4ODgsImV4cCI6MjA3MjgwNzg4OH0.C0wWEbIefO8QxTiCNesHkyglgbxlw3SEq9ZwKr3YCUo';
+let supa = null;
+(async () => {
+    try {
+        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+        supa = createClient(SUPABASE_URL, SUPABASE_ANON);
+    } catch (e) { console.warn('Supabase indisponibil (offline?):', e); }
+})();
+
+async function supaSignedUrl(storage_path) {
+    if (!supa || !storage_path) return null;
+    const objectName = storage_path.replace(/^videos\//, '');
+    const { data, error } = await supa.storage.from('videos').createSignedUrl(objectName, 60 * 60 * 12);
+    if (error) throw error;
+    return data.signedUrl;
+}
+async function supaAddLink(url, isPublic, meta) {
+    if (!supa) throw new Error('Supabase indisponibil');
+    const row = {
+        title: meta.title || 'Fără titlu', description: meta.description || '', tags: meta.tags || [],
+        recorded_on: meta.date || new Date().toISOString().slice(0, 10), storage_path: null, source_url: url, is_public: !!isPublic
+    };
+    const { data, error } = await supa.from('videos').insert(row).select('id').single();
+    if (error) throw error;
+    return { id: data.id, storage_path: null, source_url: url };
+}
+async function supaUploadMp4(file, isPublic, meta) {
+    if (!supa) throw new Error('Supabase indisponibil');
+    if (!file || file.type !== 'video/mp4') throw new Error('Alege un fișier .mp4');
+    const objectName = `anon/${crypto.randomUUID()}.mp4`;
+    const { error: upErr } = await supa.storage.from('videos').upload(objectName, file, { contentType: 'video/mp4', upsert: false });
+    if (upErr) throw upErr;
+    const row = {
+        title: meta.title || 'Fără titlu', description: meta.description || '', tags: meta.tags || [],
+        recorded_on: meta.date || new Date().toISOString().slice(0, 10), storage_path: `videos/${objectName}`, source_url: null, is_public: !!isPublic
+    };
+    const { data, error } = await supa.from('videos').insert(row).select('id,storage_path').single();
+    if (error) throw error;
+    return { id: data.id, storage_path: data.storage_path, source_url: null };
+}
+async function supaDeleteCloudByRow(row) {
+    if (!supa) return;
+    try {
+        if (row.storage_path) {
+            const objectName = row.storage_path.replace(/^videos\//, '');
+            await supa.storage.from('videos').remove([objectName]);
+        }
+    } catch (e) { console.warn('Storage remove:', e?.message || e); }
+    try {
+        if (row.cloud_id) {
+            await supa.from('videos').delete().eq('id', row.cloud_id);
+        } else if (row.storage_path) {
+            await supa.from('videos').delete().eq('storage_path', row.storage_path);
+        } else if (row.source_url) {
+            await supa.from('videos').delete().eq('source_url', row.source_url);
+        }
+    } catch (e) { console.warn('Table delete:', e?.message || e); }
+}
+async function supaListPublic() { // doar public (fără login supabase)
+    if (!supa) return [];
+    const { data, error } = await supa.from('videos').select('*').eq('is_public', true).order('created_at', { ascending: false }).limit(200);
+    if (error) { console.warn('list public:', error.message); return []; }
+    const out = [];
+    for (const r of data) {
+        let url = r.source_url || null;
+        if (!url && r.storage_path) {
+            try { url = await supaSignedUrl(r.storage_path); } catch { }
+        }
+        out.push({
+            id: r.id, title: r.title, url, date: r.recorded_on, tags: r.tags || [], desc: r.description || '',
+            is_public: !!r.is_public, storage_path: r.storage_path || null, source_url: r.source_url || null,
+            cloud: true, cloud_id: r.id, owner: r.owner || 'anon'
+        });
+    }
+    return out;
+}
 
 /* ===== Render ===== */
+async function loadForGrid() {
+    const cloud = await supaListPublic();   // publice din cloud
+    const local = loadVideos();             // ce ai local (vechile tale)
+    // Nu duplicăm: excludem din local pe cele care au cloud_id egal cu id-ul cloud (dacă s-a sincronizat)
+    const cloudIds = new Set(cloud.map(x => String(x.cloud_id || x.id)));
+    const merged = [...cloud, ...local.filter(x => !x.cloud_id || !cloudIds.has(String(x.cloud_id)))];
+    return merged;
+}
+
 async function renderReset() {
     grid.innerHTML = ''; renderedCount = 0;
     videos = await loadForGrid();
+    refreshTagFilter();
     currentList = collectFilters();
     loadMoreBtn.hidden = currentList.length <= PAGE_SIZE;
     renderMore();
@@ -91,7 +170,6 @@ function renderMore() {
 function renderCard(v) {
     const tpl = document.getElementById('cardTpl');
     const node = tpl.content.firstElementChild.cloneNode(true);
-
     const media = node.querySelector('.media');
     const title = node.querySelector('.title');
     const date = node.querySelector('.date');
@@ -107,7 +185,7 @@ function renderCard(v) {
     } else if (v.blobUrl) {
         const vid = document.createElement('video'); vid.controls = true; vid.src = v.blobUrl; media.appendChild(vid);
     } else {
-        media.textContent = 'Adaugă un URL sau un fișier .mp4.';
+        media.textContent = '(fără media)';
     }
 
     title.textContent = v.title || 'Fără titlu';
@@ -117,15 +195,16 @@ function renderCard(v) {
 
     const eb = node.querySelector('[data-action="edit"]');
     const db = node.querySelector('[data-action="delete"]');
-    const allow = canEdit(v);
-    eb.style.display = allow ? '' : 'none';
-    db.style.display = allow ? '' : 'none';
+    const allowed = canEdit(v);
+    eb.style.display = allowed ? '' : 'none';
+    db.style.display = allowed ? '' : 'none';
 
     eb.addEventListener('click', () => {
-        if (!allow) return;
+        if (!allowed) return;
         editId = v.id;
-        editRow = v; // memorează rândul cloud (id, owner, storage_path etc.)
-        setTab('link');
+        editRow = v;
+        // doar meta prin "Link" (fișierele cloud recomand să le înlocuiești prin ștergere + reupload)
+        tabLink.click();
         titleInput.value = v.title || '';
         urlInput.value = v.source_url || v.url || '';
         dateInput.value = v.date || new Date().toISOString().slice(0, 10);
@@ -135,16 +214,16 @@ function renderCard(v) {
     });
 
     db.addEventListener('click', async () => {
-        if (!allow) return;
+        if (!allowed) return;
         if (!confirm('Ștergi acest clip?')) return;
 
-        // cloud: șterge din tabel + storage
-        if (supa && supaUser && v.id) {
-            try { await supaDeleteVideo(v); await renderReset(); return; }
-            catch (e) { console.error(e); alert(e?.message || 'Eroare la ștergere'); return; }
-        }
-        // local fallback
-        videos = videos.filter(x => x.id !== v.id);
+        // 1) încearcă să ștergi din cloud (dacă are storage_path/source_url/cloud_id)
+        try {
+            await supaDeleteCloudByRow(v);
+        } catch (e) { console.warn('cloud delete:', e?.message || e); }
+
+        // 2) șterge local
+        videos = videos.filter(x => x !== v && x.id !== v.id);
         saveVideos(videos);
         refreshTagFilter();
         renderReset();
@@ -153,7 +232,7 @@ function renderCard(v) {
     grid.appendChild(node);
 }
 
-/* ===== Tab-uri dialog ===== */
+/* ===== Tab-uri, Add/Edit ===== */
 function setTab(name) {
     activeTab = name;
     tabLink.classList.toggle('active', name === 'link');
@@ -164,91 +243,95 @@ function setTab(name) {
 tabLink.addEventListener('click', () => setTab('link'));
 tabUpload.addEventListener('click', () => setTab('upload'));
 
-/* ===== Add / Edit (local fallback rămâne) ===== */
 function openAdd() {
-    if (!isAdmin && !supaUser) return alert('Doar adminul sau un utilizator logat poate adăuga.');
-    editId = null; editRow = null; setTab('link');
+    if (!isAdmin) return alert('Doar adminul poate adăuga.');
+    editId = null; editRow = null;
+    setTab('link');
     titleInput.value = ''; urlInput.value = ''; dateInput.value = new Date().toISOString().slice(0, 10);
     tagsInput.value = ''; descInput.value = '';
     fileInput.value = ''; uTitleInput.value = ''; uDateInput.value = new Date().toISOString().slice(0, 10); uTagsInput.value = '';
+    chkPublicLink && (chkPublicLink.checked = false);
+    chkPublicUpload && (chkPublicUpload.checked = false);
     prog.hidden = true; prog.value = 0; progInfo.textContent = '';
     dlg.showModal();
 }
 if (btnAdd) btnAdd.addEventListener('click', openAdd);
 
-/* ===== Salvare ===== */
+/* ===== Salvare (cu cloud + fallback local) ===== */
 saveBtn.addEventListener('click', async (e) => {
     e.preventDefault();
+    try {
+        if (activeTab === 'link') {
+            const title = (titleInput.value || '').trim() || 'Fără titlu';
+            const url = (urlInput.value || '').trim();
+            if (!url) return alert('Pune URL (YouTube sau .mp4)');
+            const date = dateInput.value || new Date().toISOString().slice(0, 10);
+            const tags = (tagsInput.value || '').split(',').map(s => s.trim()).filter(Boolean);
+            const desc = (descInput.value || '').trim();
+            const isPublic = !!chkPublicLink?.checked;
 
-    // === CLOUD (Supabase) ===
-    if (supa && supaUser) {
-        try {
-            if (activeTab === 'link') {
-                const title = (titleInput.value || '').trim() || 'Fără titlu';
-                const url = (urlInput.value || '').trim();
-                if (!url) { alert('Pune URL (YouTube sau .mp4)'); return; }
-                const date = dateInput.value || new Date().toISOString().slice(0, 10);
-                const tags = (tagsInput.value || '').split(',').map(s => s.trim()).filter(Boolean);
-                const description = (descInput.value || '').trim();
-                const isPublic = document.getElementById('chkPublicLink')?.checked ?? false;
-
-                if (editId && editRow && editRow.owner === supaUser.id) {
-                    await supaUpdateLink(editId, { title, description, tags, date, source_url: url, is_public: isPublic });
-                } else {
-                    await supaAddLink(url, isPublic, { title, description, tags, date });
-                }
+            // UPDATE local (nu duplicăm)
+            if (editId) {
+                const idx = videos.findIndex(x => x.id === editId);
+                if (idx >= 0) videos[idx] = { ...videos[idx], title, url, date, tags, desc, source_url: url };
+                saveVideos(videos);
             } else {
-                // pentru fișiere: nu „rescriem” un rând existent; recomandăm ștergere + reupload
-                if (editId && editRow) { alert('Pentru fișiere: șterge clipul vechi și încarcă altul.'); return; }
-                const file = fileInput.files?.[0];
-                if (!file) { alert('Alege un fișier .mp4'); return; }
-                if (file.type !== 'video/mp4') { alert('Accept doar .mp4'); return; }
-                const title = (uTitleInput.value || file.name.replace(/\.[^.]+$/, '')).trim();
-                const date = uDateInput.value || new Date().toISOString().slice(0, 10);
-                const tags = (uTagsInput.value || '').split(',').map(s => s.trim()).filter(Boolean);
-                const isPublic = document.getElementById('chkPublicUpload')?.checked ?? false;
-                await supaUploadMp4(file, isPublic, { title, tags, date, description: '' });
+                const item = { id: Date.now(), title, url, date, tags, desc, source_url: url };
+                videos.unshift(item);
+                saveVideos(videos);
             }
 
-            dlg.close();
-            await renderReset();
-            return; // oprim fallback-ul local
-        } catch (err) {
-            console.error(err);
-            alert(err?.message || 'Eroare la încărcare în cloud');
-            return;
+            // În paralel: încearcă să scrii și în cloud
+            try {
+                const ins = await supaAddLink(url, isPublic, { title, description: desc, tags, date });
+                // atașează identificator cloud la itemul local (pentru ștergere ulterioară)
+                const idx = videos.findIndex(x => x.id === editId || (!editId && x.source_url === url && x.title === title));
+                if (idx >= 0) { videos[idx].cloud_id = ins.id; videos[idx].storage_path = ins.storage_path; videos[idx].cloud = true; saveVideos(videos); }
+            } catch (e) { console.warn('cloud insert link:', e?.message || e); }
+
+        } else {
+            const file = fileInput.files?.[0];
+            if (!file) return alert('Alege un fișier .mp4');
+            if (file.type !== 'video/mp4') return alert('Accept doar .mp4');
+            const title = (uTitleInput.value || file.name.replace(/\.[^.]+$/, '')).trim();
+            const date = uDateInput.value || new Date().toISOString().slice(0, 10);
+            const tags = (uTagsInput.value || '').split(',').map(s => s.trim()).filter(Boolean);
+            const isPublic = !!chkPublicUpload?.checked;
+
+            // local imediat (pentru UX)
+            const blobUrl = URL.createObjectURL(file);
+            const item = { id: Date.now(), title, blobUrl, url: '', date, tags, desc: '', cloud: false };
+            videos.unshift(item); saveVideos(videos);
+
+            // încearcă upload în cloud și leagă înregistrarea
+            try {
+                prog.hidden = false; prog.value = 5; progInfo.textContent = 'Se urcă...';
+                const ins = await supaUploadMp4(file, isPublic, { title, tags, date, description: '' });
+                prog.hidden = true; progInfo.textContent = '';
+                // obține URL semnat pentru redare
+                let signed = null; try { signed = await supaSignedUrl(ins.storage_path); } catch { }
+                // actualizează itemul local (primul din listă este cel adăugat)
+                const idx = videos.findIndex(x => x.id === item.id);
+                if (idx >= 0) {
+                    videos[idx].cloud = true;
+                    videos[idx].cloud_id = ins.id;
+                    videos[idx].storage_path = ins.storage_path;
+                    videos[idx].url = signed || videos[idx].url;
+                    saveVideos(videos);
+                }
+            } catch (e) {
+                prog.hidden = true; progInfo.textContent = '';
+                console.warn('cloud upload mp4:', e?.message || e);
+                // rămâne măcar local
+            }
         }
+
+        dlg.close();
+        await renderReset();
+    } catch (err) {
+        console.error(err);
+        alert(err?.message || 'Eroare la salvare');
     }
-
-    // === Fallback local (admin simplu) ===
-    if (!isAdmin) return alert('Doar adminul poate salva (local).');
-
-    if (activeTab === 'link') {
-        const title = titleInput.value.trim() || 'Fără titlu';
-        const url = urlInput.value.trim();
-        if (!url) { alert('Pune URL (YouTube sau .mp4)'); return; }
-        const date = dateInput.value || new Date().toISOString().slice(0, 10);
-        const tags = tagsInput.value.split(',').map(s => s.trim()).filter(Boolean);
-        const desc = (descInput.value || '').trim();
-
-        if (editId) { const idx = videos.findIndex(x => x.id === editId); if (idx >= 0) videos[idx] = { ...videos[idx], title, url, date, tags, desc, blobUrl: '' }; }
-        else videos.unshift({ id: Date.now(), title, url, date, tags, desc, blobUrl: '' });
-
-        saveVideos(videos); refreshTagFilter(); dlg.close(); renderReset(); return;
-    }
-
-    const file = fileInput.files?.[0];
-    if (!file) { alert('Alege un fișier .mp4'); return; }
-    if (file.type !== 'video/mp4') { alert('Accept doar .mp4'); return; }
-    const title = (uTitleInput.value.trim() || file.name.replace(/\.[^.]+$/, ''));
-    const date = uDateInput.value || new Date().toISOString().slice(0, 10);
-    const tags = uTagsInput.value.split(',').map(s => s.trim()).filter(Boolean);
-    const blobUrl = URL.createObjectURL(file);
-
-    if (editId) { const idx = videos.findIndex(x => x.id === editId); if (idx >= 0) videos[idx] = { ...videos[idx], title, blobUrl, url: '', date, tags, desc: '' }; }
-    else videos.unshift({ id: Date.now(), title, blobUrl, url: '', date, tags, desc: '' });
-
-    saveVideos(videos); refreshTagFilter(); dlg.close(); renderReset();
 });
 
 /* ===== Căutare/filtre/paginare ===== */
@@ -257,7 +340,7 @@ sortSelect.addEventListener('change', renderReset);
 tagFilter.addEventListener('change', renderReset);
 if (loadMoreBtn) loadMoreBtn.addEventListener('click', renderMore);
 
-/* ===== Export/Import (local) ===== */
+/* ===== Export/Import ===== */
 if (btnExport) btnExport.addEventListener('click', () => {
     const data = JSON.stringify(videos, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
@@ -268,22 +351,22 @@ if (btnExport) btnExport.addEventListener('click', () => {
 if (importBtn) importBtn.addEventListener('click', () => importInput.click());
 if (importInput) importInput.addEventListener('change', () => {
     const f = importInput.files?.[0]; if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
+    const r = new FileReader();
+    r.onload = () => {
         try {
-            const arr = JSON.parse(reader.result); if (!Array.isArray(arr)) throw new Error('Format invalid');
-            const cleaned = arr.map(x => ({ id: x.id || Date.now() + Math.random(), title: x.title || 'Fără titlu', url: x.url || '', blobUrl: x.blobUrl || '', date: x.date || new Date().toISOString().slice(0, 10), desc: x.desc || '', tags: Array.isArray(x.tags) ? x.tags.filter(Boolean) : [] }));
-            videos = cleaned; saveVideos(videos); refreshTagFilter(); renderReset(); alert('Import realizat.'); importInput.value = '';
-        } catch (err) { alert('Eroare la import: ' + err.message); }
+            const arr = JSON.parse(r.result); if (!Array.isArray(arr)) throw new Error('Format invalid');
+            videos = arr.map(x => ({ id: x.id || Date.now() + Math.random(), title: x.title || 'Fără titlu', url: x.url || '', blobUrl: x.blobUrl || '', date: x.date || new Date().toISOString().slice(0, 10), desc: x.desc || '', tags: Array.isArray(x.tags) ? x.tags.filter(Boolean) : [], cloud: !!x.cloud, cloud_id: x.cloud_id || null, storage_path: x.storage_path || null, source_url: x.source_url || null }));
+            saveVideos(videos); refreshTagFilter(); renderReset(); alert('Import realizat.'); importInput.value = '';
+        } catch (e) { alert('Eroare la import: ' + e.message); }
     };
-    reader.readAsText(f);
+    r.readAsText(f);
 });
 
-/* ===== Admin local simplu ===== */
-const ADMIN_FLAG = 'vlogAdmin';
+/* ===== Admin local (care la tine „mergea sigur”) ===== */
+const ADMIN_FLAG = 'vlogAdmin'; // 1 = logat
 isAdmin = localStorage.getItem(ADMIN_FLAG) === '1';
 function refreshAdminUI() {
-    if (btnAdd) btnAdd.hidden = !isAdmin && !supaUser;
+    if (btnAdd) btnAdd.hidden = !isAdmin;
     if (btnExport) btnExport.hidden = !isAdmin;
     if (importBtn) importBtn.hidden = !isAdmin;
     if (loginBtn) loginBtn.style.display = isAdmin ? 'none' : '';
@@ -299,152 +382,7 @@ if (logoutBtn) logoutBtn.addEventListener('click', () => {
     isAdmin = false; localStorage.removeItem(ADMIN_FLAG); refreshAdminUI();
 });
 
-/* ===== Supabase ===== */
-const SUPABASE_URL = "https://njgvdvslmshwwwttbjzi.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qZ3ZkdnNsbXNod3d3dHRianppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcyMzE4ODgsImV4cCI6MjA3MjgwNzg4OH0.C0wWEbIefO8QxTiCNesHkyglgbxlw3SEq9ZwKr3YCUo";
-const SITE_URL = "https://razvancodreanu.github.io/VlogRazvan/"; // IMPORTANT: folosit la redirect
-
-let supa = null, supaUser = null;
-
-async function supaInit() {
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    supa = createClient(SUPABASE_URL, SUPABASE_ANON);
-
-    // --- Consumă codul PKCE și curăță URL-ul (oprește bucla de login)
-    try {
-        const fullUrl = window.location.href;
-        if (fullUrl.includes('code=')) {
-            await supa.auth.exchangeCodeForSession({ currentUrl: fullUrl });
-            const url = new URL(fullUrl);
-            url.searchParams.delete('code'); url.searchParams.delete('state');
-            history.replaceState({}, '', url.pathname + (url.search ? `?${url.searchParams.toString()}` : ''));
-        }
-        if (window.location.hash.includes('access_token')) {
-            history.replaceState({}, '', window.location.pathname + window.location.search);
-        }
-    } catch (e) { console.warn('auth exchange/cleanup', e); }
-
-    const { data: { session } } = await supa.auth.getSession();
-    supaUser = session?.user || null;
-
-    supa.auth.onAuthStateChange((_e, s) => {
-        supaUser = s?.user || null;
-        renderAuthUI();
-        renderReset();
-    });
-}
-function renderAuthUI() {
-    const inBtn = document.getElementById('btnLogin');
-    const outBtn = document.getElementById('btnLogout');
-    if (!inBtn || !outBtn) return;
-    inBtn.style.display = supaUser ? 'none' : '';
-    outBtn.style.display = supaUser ? '' : 'none';
-}
-async function supaSignIn() {
-    const email = prompt('Email pentru logare (primești un link):');
-    if (!email) return;
-    const { error } = await supa.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: SITE_URL } // URL-ul tău fix de pe GitHub Pages
-    });
-    if (error) alert(error.message);
-    else alert('Verifică emailul și apasă pe linkul primit.');
-}
-async function supaSignOut() { await supa.auth.signOut(); }
-
-document.getElementById('btnLogin')?.addEventListener('click', supaSignIn);
-document.getElementById('btnLogout')?.addEventListener('click', supaSignOut);
-
-/* Upload/link/listare */
-async function supaUploadMp4(file, isPublic, meta) {
-    if (!supa) throw new Error('Supabase nu e inițializat.');
-    if (!supaUser) throw new Error('Trebuie să fii logat.');
-    if (!file || file.type !== 'video/mp4') throw new Error('Alege un fișier .mp4');
-
-    const objectName = `${supaUser.id}/${crypto.randomUUID()}.mp4`;
-    const { error: upErr } = await supa.storage.from('videos').upload(objectName, file, { contentType: 'video/mp4', upsert: false });
-    if (upErr) throw upErr;
-
-    const row = {
-        owner: supaUser.id,
-        title: meta.title || 'Fără titlu',
-        description: meta.description || '',
-        tags: meta.tags || [],
-        recorded_on: meta.date || new Date().toISOString().slice(0, 10),
-        storage_path: `videos/${objectName}`,
-        source_url: null,
-        is_public: !!isPublic
-    };
-    const { error: insErr } = await supa.from('videos').insert(row);
-    if (insErr) throw insErr;
-}
-async function supaAddLink(url, isPublic, meta) {
-    const row = {
-        owner: supaUser.id,
-        title: meta.title || 'Fără titlu',
-        description: meta.description || '',
-        tags: meta.tags || [],
-        recorded_on: meta.date || new Date().toISOString().slice(0, 10),
-        storage_path: null,
-        source_url: url,
-        is_public: !!isPublic
-    };
-    const { error } = await supa.from('videos').insert(row);
-    if (error) throw error;
-}
-async function supaUpdateLink(id, fields) {
-    const { error } = await supa.from('videos').update(fields).eq('id', id);
-    if (error) throw error;
-}
-async function supaDeleteVideo(row) {
-    if (!row?.id) throw new Error('Lipsește id-ul videoclipului.');
-    if (row.storage_path) {
-        const objectName = row.storage_path.replace(/^videos\//, '');
-        try { await supa.storage.from('videos').remove([objectName]); } catch { }
-    }
-    const { error } = await supa.from('videos').delete().eq('id', row.id);
-    if (error) throw error;
-}
-async function supaListVideos({ limit = 200, offset = 0 } = {}) {
-    if (!supa) return [];
-    if (!supaUser) {
-        const { data, error } = await supa.from('videos')
-            .select('*').eq('is_public', true)
-            .order('created_at', { ascending: false }).range(offset, offset + limit - 1);
-        if (error) throw error; return data;
-    } else {
-        const mine = await supa.from('videos').select('*').eq('owner', supaUser.id).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
-        const pub = await supa.from('videos').select('*').eq('is_public', true).neq('owner', supaUser.id).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
-        if (mine.error) throw mine.error; if (pub.error) throw pub.error;
-        return [...mine.data, ...pub.data];
-    }
-}
-
-/* Transformă din cloud în structură pentru UI */
-async function loadForGrid() {
-    if (supa) {
-        const rows = await supaListVideos({ limit: 200 });
-        const out = [];
-        for (const r of rows) {
-            let url = r.source_url || null;
-            if (!url && r.storage_path) {
-                const objectName = r.storage_path.replace(/^videos\//, '');
-                const { data, error } = await supa.storage.from('videos').createSignedUrl(objectName, 60 * 60 * 12);
-                if (!error) url = data.signedUrl;
-            }
-            out.push({
-                id: r.id, title: r.title, url,
-                date: r.recorded_on, tags: r.tags, desc: r.description,
-                is_public: r.is_public, storage_path: r.storage_path, owner: r.owner,
-                source_url: r.source_url || null
-            });
-        }
-        return out;
-    }
-    return loadVideos(); // fallback local
-}
-
 /* ===== Init ===== */
-function refreshAdminUIAll() { refreshAdminUI(); renderAuthUI(); }
-refreshAdminUIAll(); refreshTagFilter();
-await supaInit(); refreshAdminUIAll(); await renderReset();
+refreshAdminUI();
+refreshTagFilter();
+renderReset();
