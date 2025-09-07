@@ -186,9 +186,10 @@ function sanitize(name) {
 }
 
 // ====== Render ======
-function renderReset() {
+async function renderReset() {
     grid.innerHTML = "";
     renderedCount = 0;
+    videos = await loadForGrid();
     currentList = collectFilters();
     loadMoreBtn.hidden = currentList.length <= PAGE_SIZE;
     renderMore();
@@ -308,8 +309,45 @@ function openEdit(id) {
     dlg.showModal();
 }
 
-saveBtn.addEventListener("click", (e) => {
+saveBtn.addEventListener("click", async (e) => {
     e.preventDefault();
+    // === CLOUD (Supabase) ===
+    if (supa && supaUser) {
+        try {
+            if (activeTab === "link") {
+                const title = (titleInput.value || "").trim() || "Fără titlu";
+                const url = (urlInput.value || "").trim();
+                if (!url) { alert("Pune URL (YouTube sau .mp4)"); return; }
+
+                const date = dateInput.value || new Date().toISOString().slice(0, 10);
+                const tags = (tagsInput.value || "").split(",").map(s => s.trim()).filter(Boolean);
+                const desc = (descInput.value || "").trim();
+                const isPublic = document.getElementById("chkPublicLink")?.checked ?? false;
+
+                await supaAddLink(url, isPublic, { title, description: desc, tags, date });
+            } else {
+                const file = fileInput.files?.[0];
+                if (!file) { alert("Alege un fișier .mp4"); return; }
+                if (file.type !== "video/mp4") { alert("Accept doar .mp4"); return; }
+
+                const title = (uTitleInput.value || file.name.replace(/\.[^.]+$/, "")).trim();
+                const date = uDateInput.value || new Date().toISOString().slice(0, 10);
+                const tags = (uTagsInput.value || "").split(",").map(s => s.trim()).filter(Boolean);
+                const isPublic = document.getElementById("chkPublicUpload")?.checked ?? false;
+
+                await supaUploadMp4(file, isPublic, { title, tags, date, description: "" });
+            }
+
+            dlg.close();
+            if (typeof renderReset === "function") await renderReset();
+            return; // oprim fluxul vechi local
+        } catch (err) {
+            console.error(err);
+            alert(err?.message || "Eroare la încărcare în cloud");
+            return;
+        }
+    }
+
     if (!isAdmin) return alert("Doar adminul poate salva.");
 
     if (activeTab === "link") {
@@ -487,4 +525,123 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('btnLogin')?.addEventListener('click', supaSignIn);
     document.getElementById('btnLogout')?.addEventListener('click', supaSignOut);
 });
+// ====== SUPABASE: Upload MP4 + Add Link + Utilitare ======
+
+// 1) Încarcă .mp4 în bucketul "videos" și scrie rândul în tabela public.videos
+async function supaUploadMp4(file, isPublic, meta) {
+    if (!supa) throw new Error("Supabase nu e inițializat.");
+    if (!supaUser) throw new Error("Trebuie să fii logat.");
+    if (!file || file.type !== "video/mp4") throw new Error("Alege un fișier .mp4");
+
+    const objectName = `${supaUser.id}/${crypto.randomUUID()}.mp4`;
+    const { error: upErr } = await supa.storage
+        .from('videos')
+        .upload(objectName, file, { contentType: 'video/mp4', upsert: false });
+    if (upErr) throw upErr;
+
+    const row = {
+        owner: supaUser.id,
+        title: meta.title || "Fără titlu",
+        description: meta.description || "",
+        tags: meta.tags || [],
+        recorded_on: meta.date || new Date().toISOString().slice(0, 10),
+        storage_path: `videos/${objectName}`,  // <- fișier în Storage
+        source_url: null,                      // <- nu e link extern
+        is_public: !!isPublic
+    };
+    const { error: insErr } = await supa.from('videos').insert(row);
+    if (insErr) throw insErr;
+}
+
+// 2) Adaugă un clip ca LINK (YouTube sau .mp4 găzduit extern)
+async function supaAddLink(url, isPublic, meta) {
+    if (!supa) throw new Error("Supabase nu e inițializat.");
+    if (!supaUser) throw new Error("Trebuie să fii logat.");
+    if (!url) throw new Error("Lipsește URL-ul.");
+
+    const row = {
+        owner: supaUser.id,
+        title: meta.title || "Fără titlu",
+        description: meta.description || "",
+        tags: meta.tags || [],
+        recorded_on: meta.date || new Date().toISOString().slice(0, 10),
+        storage_path: null,      // <- nu e fișier în Storage
+        source_url: url,         // <- link extern
+        is_public: !!isPublic
+    };
+    const { error } = await supa.from('videos').insert(row);
+    if (error) throw error;
+}
+
+// 3) (vom folosi în pașii următori) – listare și URL semnat pt. redare
+async function supaListVideos({ limit = 200, offset = 0 } = {}) {
+    if (!supa) return [];
+    if (!supaUser) {
+        const { data, error } = await supa.from('videos')
+            .select('*').eq('is_public', true)
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+        if (error) throw error;
+        return data;
+    } else {
+        const mine = await supa.from('videos')
+            .select('*').eq('owner', supaUser.id)
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+        const pub = await supa.from('videos')
+            .select('*').eq('is_public', true).neq('owner', supaUser.id)
+            .order('created_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+        if (mine.error) throw mine.error;
+        if (pub.error) throw pub.error;
+        return [...mine.data, ...pub.data];
+    }
+}
+
+async function supaGetPlayableUrl(row) {
+    if (row.source_url) return row.source_url;           // YouTube / mp4 extern
+    if (!row.storage_path) return null;                  // nimic de redat
+    const objectName = row.storage_path.replace(/^videos\//, '');
+    const { data, error } = await supa.storage
+        .from('videos')
+        .createSignedUrl(objectName, 60 * 60 * 12);            // 12 ore
+    if (error) throw error;
+    return data.signedUrl;
+}
+// ====== Încarcă date pentru grilă (Cloud dacă există, altfel fallback local) ======
+async function loadForGrid() {
+    if (supa) {
+        const rows = await supaListVideos({ limit: 200 });
+
+        const out = [];
+        for (const r of rows) {
+            let url = r.source_url || null;
+
+            // dacă e fișier încărcat în Storage, generează URL semnat (valabil 12h)
+            if (!url && r.storage_path) {
+                const objectName = r.storage_path.replace(/^videos\//, '');
+                const { data, error } = await supa.storage
+                    .from('videos')
+                    .createSignedUrl(objectName, 60 * 60 * 12);
+                if (!error) url = data.signedUrl;
+            }
+
+            out.push({
+                id: r.id,
+                title: r.title,
+                url,                          // acum randarea ta existentă pentru .mp4 va funcționa
+                date: r.recorded_on,
+                tags: r.tags,
+                desc: r.description,
+                is_public: r.is_public,
+                storage_path: r.storage_path,
+                owner: r.owner
+            });
+        }
+        return out;
+    }
+
+    // fallback: vechiul tău loader local
+    return loadVideos();
+}
 

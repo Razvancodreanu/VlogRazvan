@@ -313,3 +313,32 @@ progress {
     *::-webkit-scrollbar-thumb:hover {
         background: #374151;
     }
+
+#authControls button:hover { opacity: 0.9; }
+/* ==== Auth controls (vizibil pe tema dark) ==== */
+#authControls {
+    margin: 12px 0;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+    #authControls button {
+        padding: 8px 12px;
+        border: 0;
+        border-radius: 10px;
+        font-weight: 600;
+        background: var(--primary, #0ea5e9); /* folosește --primary dacă există, altfel albastru */
+        color: #fff;
+        cursor: pointer;
+    }
+
+        #authControls button:hover {
+            opacity: 0.9;
+        }
+
+        #authControls button:focus {
+            outline: 2px solid rgba(255,255,255,.4);
+            outline-offset: 2px;
+        }
+
